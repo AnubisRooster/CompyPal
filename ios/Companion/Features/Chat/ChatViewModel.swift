@@ -5,6 +5,10 @@ class ChatViewModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isStreaming = false
     @Published var errorMessage: String?
+    @Published var isSpeaking = false
+    @Published var isListening = false
+    @Published var mouthOpen: Float = 0
+    @Published var currentEmotion = "neutral"
 
     let companion: CompanionInfo
 
@@ -13,8 +17,12 @@ class ChatViewModel: ObservableObject {
     private let extractor: MemoryExtractor
     private let keychain = KeychainService()
     private let catalogCache = CatalogCache()
+    private let ttsEngine = TTSEngine()
+    private let audioRecorder = AudioRecorderService()
+
     private var userId: Int64 = 1
     private var chatCandidates: [CatalogEntry] = []
+    private var pendingTranscript = ""
 
     init(companion: CompanionInfo) {
         self.companion = companion
@@ -25,7 +33,6 @@ class ChatViewModel: ObservableObject {
         userId = (try? await store.ensureUser()) ?? 1
         let recent = (try? await store.recentTurns(companionId: companion.id, limit: 20)) ?? []
         messages = recent.map { ChatMessage(role: $0.role, text: $0.text) }
-
         await loadApiKey()
         await loadChatCandidates()
     }
@@ -75,23 +82,80 @@ class ChatViewModel: ObservableObject {
 
         isStreaming = false
 
-        if succeeded, !fullReply.trimmingCharacters(in: .whitespaces).isEmpty {
-            let assistantTurnId = (try? await store.insertTurn(companionId: companion.id, role: "assistant", text: fullReply)) ?? 0
-            let catalog = (await catalogCache.load())?.entries ?? []
-            Task {
-                try? await extractor.extractAndStore(
-                    userId: userId,
-                    companionId: companion.id,
-                    turnId: turnId,
-                    userText: trimmed,
-                    assistantText: fullReply,
-                    catalog: catalog
-                )
+        guard succeeded, !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
+            if !succeeded {
+                messages[msgIndex].text = "⚠️ All models failed. Check your API key or try refreshing the model catalog."
             }
-            await checkStagePromotion()
-        } else if !succeeded {
-            messages[msgIndex].text = "⚠️ All models failed. Check your API key or try refreshing the model catalog."
+            return
         }
+
+        let assistantTurnId = (try? await store.insertTurn(companionId: companion.id, role: "assistant", text: fullReply)) ?? 0
+
+        let catalog = (await catalogCache.load())?.entries ?? []
+        Task {
+            try? await extractor.extractAndStore(
+                userId: userId, companionId: companion.id, turnId: turnId,
+                userText: trimmed, assistantText: fullReply, catalog: catalog
+            )
+        }
+        await checkStagePromotion()
+        speakReply(fullReply)
+    }
+
+    func toggleVoiceInput() {
+        if isListening { stopListening() }
+        else { startListening() }
+    }
+
+    private func startListening() {
+        Task {
+            let granted = await audioRecorder.requestPermission()
+            guard granted else { return }
+            isListening = true
+            audioRecorder.startRecording { [weak self] transcript in
+                Task { @MainActor in
+                    self?.pendingTranscript = transcript
+                }
+            }
+        }
+    }
+
+    private func stopListening() {
+        audioRecorder.stopRecording()
+        isListening = false
+        if !pendingTranscript.trimmingCharacters(in: .whitespaces).isEmpty {
+            let text = pendingTranscript
+            pendingTranscript = ""
+            Task { await sendText(text) }
+        }
+    }
+
+    private func speakReply(_ text: String) {
+        ttsEngine.speak(
+            text,
+            voiceId: "com.apple.voice.compact.en-US.Samantha",
+            pitch: 1.0,
+            rate: 0.5
+        ) { [weak self] mouthValue in
+            Task { @MainActor in
+                self?.mouthOpen = mouthValue
+            }
+        }
+        isSpeaking = true
+
+        Task {
+            while ttsEngine.isSpeaking {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            isSpeaking = false
+            mouthOpen = 0
+        }
+    }
+
+    func stopSpeaking() {
+        ttsEngine.stop()
+        isSpeaking = false
+        mouthOpen = 0
     }
 
     private func loadApiKey() async {

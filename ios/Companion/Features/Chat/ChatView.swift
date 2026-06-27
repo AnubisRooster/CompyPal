@@ -10,6 +10,8 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            avatarSection
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -33,25 +35,65 @@ struct ChatView: View {
                 }
             }
 
-            HStack(spacing: 12) {
-                TextField("Message...", text: $inputText)
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(viewModel.isStreaming)
-
-                Button("Send") {
-                    let text = inputText
-                    inputText = ""
-                    Task { await viewModel.sendText(text) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isStreaming)
-            }
-            .padding()
-            .background(.bar)
+            inputBar
         }
         .navigationTitle(viewModel.companion.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if viewModel.isSpeaking {
+                Button("Stop", systemImage: "speaker.wave.2.fill") {
+                    viewModel.stopSpeaking()
+                }
+            }
+        }
         .task { await viewModel.load() }
+    }
+
+    private var avatarSection: some View {
+        AvatarView(emotion: viewModel.currentEmotion, mouthOpen: viewModel.mouthOpen)
+            .frame(height: 200)
+            .overlay(alignment: .topTrailing) {
+                if viewModel.isSpeaking {
+                    Label("Speaking", systemImage: "waveform")
+                        .font(.caption)
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                        .clipShape(.rect(cornerRadius: 8))
+                        .padding(8)
+                }
+            }
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 12) {
+            Button(action: { viewModel.toggleVoiceInput() }) {
+                Image(systemName: viewModel.isListening ? "waveform" : "mic")
+                    .font(.title2)
+                    .foregroundStyle(viewModel.isListening ? .red : .primary)
+            }
+            .disabled(viewModel.isStreaming)
+
+            TextField("Message...", text: $inputText)
+                .textFieldStyle(.roundedBorder)
+                .disabled(viewModel.isStreaming || viewModel.isListening)
+
+            if viewModel.isListening {
+                Text(viewModel.messages.last?.text ?? "")
+                    .lineLimit(1)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Send") {
+                let text = inputText
+                inputText = ""
+                Task { await viewModel.sendText(text) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isStreaming)
+        }
+        .padding()
+        .background(.bar)
     }
 }
 

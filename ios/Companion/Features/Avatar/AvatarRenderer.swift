@@ -5,118 +5,159 @@ import ARKit
 @MainActor
 class AvatarScene {
     let arView: ARView
-    private var loaded = false
-    private var loadedTask: Task<Void, Never>?
-    private var currentUrl: String?
+    private var headEntity: Entity?
+    private var jawEntity: Entity?
+    private var leftBrow: Entity?
+    private var rightBrow: Entity?
+    private var leftEye: Entity?
+    private var rightEye: Entity?
+    private var headAnchor: AnchorEntity?
 
-    init() {
+    private let headColor: SimpleMaterial.Color
+    private let browColor: SimpleMaterial.Color
+    private let eyeWhiteColor: SimpleMaterial.Color
+
+    init(headColor: SimpleMaterial.Color = UIColor(red: 0.9, green: 0.7, blue: 0.6, alpha: 1)) {
+        self.headColor = headColor
+        self.browColor = UIColor(red: 0.3, green: 0.2, blue: 0.15, alpha: 1)
+        self.eyeWhiteColor = .white
+
         arView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
-        let anchor = AnchorEntity(world: [0, -1, -2])
+        let anchor = AnchorEntity(world: [0, 0, -2])
         arView.scene.anchors.append(anchor)
-
-        let defaultHead = ModelEntity(mesh: .generateSphere(radius: 0.15), materials: [{
-            var m = SimpleMaterial()
-            m.color = .init(tint: .systemBlue)
-            return m
-        }()])
-        defaultHead.name = "head"
-        anchor.addChild(defaultHead)
-        headEntity = defaultHead
         headAnchor = anchor
+        buildHead(anchor: anchor)
+        setupLighting(anchor: anchor)
+    }
 
+    private func buildHead(anchor: AnchorEntity) {
+        let headMesh = MeshResource.generateSphere(radius: 0.18)
+        var headMat = SimpleMaterial(color: headColor, isMetallic: false)
+        headMat.roughness = 0.6
+        let head = ModelEntity(mesh: headMesh, materials: [headMat])
+        head.name = "head"
+        head.position = .zero
+        anchor.addChild(head)
+        headEntity = head
+
+        let jawMesh = MeshResource.generateSphere(radius: 0.07)
+        let jawMat = SimpleMaterial(color: headColor, isMetallic: false)
+        let jaw = ModelEntity(mesh: jawMesh, materials: [jawMat])
+        jaw.name = "jaw"
+        jaw.position = [0, -0.1, 0.12]
+        head.addChild(jaw)
+        jawEntity = jaw
+
+        let browLength: Float = 0.06
+        let browWidth: Float = 0.015
+        let browHeight: Float = 0.01
+        let browMesh = MeshResource.generateBox(width: browLength, height: browHeight, depth: browWidth)
+        let browMat = SimpleMaterial(color: browColor, isMetallic: false)
+
+        let left = ModelEntity(mesh: browMesh, materials: [browMat])
+        left.name = "leftBrow"
+        left.position = [-0.06, 0.14, 0.16]
+        head.addChild(left)
+        leftBrow = left
+
+        let right = ModelEntity(mesh: browMesh, materials: [browMat])
+        right.name = "rightBrow"
+        right.position = [0.06, 0.14, 0.16]
+        head.addChild(right)
+        rightBrow = right
+
+        let eyeMesh = MeshResource.generateSphere(radius: 0.025)
+        let eyeMat = SimpleMaterial(color: eyeWhiteColor, isMetallic: false)
+
+        let leftEyeEntity = ModelEntity(mesh: eyeMesh, materials: [eyeMat])
+        leftEyeEntity.name = "leftEye"
+        leftEyeEntity.position = [-0.05, 0.05, 0.17]
+        head.addChild(leftEyeEntity)
+        leftEye = leftEyeEntity
+
+        let rightEyeEntity = ModelEntity(mesh: eyeMesh, materials: [eyeMat])
+        rightEyeEntity.name = "rightEye"
+        rightEyeEntity.position = [0.05, 0.05, 0.17]
+        head.addChild(rightEyeEntity)
+        rightEye = rightEyeEntity
+
+        let pupilMesh = MeshResource.generateSphere(radius: 0.01)
+        let pupilMat = SimpleMaterial(color: UIColor(red: 0.2, green: 0.3, blue: 0.6, alpha: 1), isMetallic: false)
+
+        let leftPupil = ModelEntity(mesh: pupilMesh, materials: [pupilMat])
+        leftPupil.position = [0, 0, 0.03]
+        leftEyeEntity.addChild(leftPupil)
+
+        let rightPupil = ModelEntity(mesh: pupilMesh, materials: [pupilMat])
+        rightPupil.position = [0, 0, 0.03]
+        rightEyeEntity.addChild(rightPupil)
+    }
+
+    private func setupLighting(anchor: AnchorEntity) {
         let light = DirectionalLight()
-        light.light.intensity = 1000
+        light.light.intensity = 2000
         light.light.color = .white
         light.position = [2, 3, 2]
+        light.look(at: .zero, from: light.position, relativeTo: anchor)
         anchor.addChild(light)
 
-        loadAvatar(anchor: anchor, url: "https://models.readyplayer.me/6185a4acfb622cf1cdc49348.glb")
-    }
-
-    private weak var headEntity: ModelEntity?
-    private weak var headAnchor: AnchorEntity?
-
-    func reloadAvatar(url: String) {
-        guard url != currentUrl, let anchor = headAnchor else { return }
-        currentUrl = url
-        loadAvatar(anchor: anchor, url: url)
-    }
-
-    private func loadAvatar(anchor: AnchorEntity, url: String) {
-        loadedTask?.cancel()
-        loadedTask = Task {
-            guard let url = URL(string: url) else { return }
-            do {
-                let model = try await ModelEntity.loadModel(contentsOf: url)
-                model.name = "head"
-                model.scale = [0.01, 0.01, 0.01]
-
-                for child in anchor.children {
-                    if child.name == "head" || child is ModelEntity {
-                        anchor.removeChild(child)
-                    }
-                }
-
-                for child in anchor.children {
-                    if child is DirectionalLight { continue }
-                    anchor.removeChild(child)
-                }
-
-                anchor.addChild(model)
-                headEntity = model
-
-                let light = DirectionalLight()
-                light.light.intensity = 1000
-                light.light.color = .white
-                light.position = [2, 3, 2]
-                anchor.addChild(light)
-
-                if let scene = model.availableAnimations.first {
-                    model.playAnimation(scene.repeat())
-                }
-
-                loaded = true
-            } catch {
-                let fallback = ModelEntity(mesh: .generateSphere(radius: 0.15), materials: [{
-                    var m = SimpleMaterial()
-                    m.color = .init(tint: .systemGray)
-                    return m
-                }()])
-                fallback.name = "head"
-                anchor.addChild(fallback)
-                headEntity = fallback
-            }
-        }
+        let fill = DirectionalLight()
+        fill.light.intensity = 800
+        fill.light.color = UIColor(white: 0.9, alpha: 1)
+        fill.position = [-2, 1, 1]
+        fill.look(at: .zero, from: fill.position, relativeTo: anchor)
+        anchor.addChild(fill)
     }
 
     func applyExpression(emotion: String, mouthOpen: Float) {
-        guard let entity = arView.scene.anchors.first?.children.first(where: { $0.name == "head" }) as? ModelEntity
-        else { return }
-
         let w = BlendShapeWeights.weights(for: emotion)
-        var s: Float = 1.0
-        let open = max(w.jawOpen, w.mouthOpen, mouthOpen)
-        if open > 0.05 { s = 1.0 + open * 0.12 }
-        let tilt = w.browInnerUp * 0.03 - w.browDown * 0.02
-        let rot = simd_quatf(angle: tilt, axis: [1, 0, 0])
-        entity.move(to: Transform(scale: [s, s, s], rotation: rot, translation: .zero),
-                     relativeTo: entity.parent, duration: 0.08, timingFunction: .easeInOut)
+        let jaw = max(w.jawOpen, w.mouthOpen, mouthOpen)
+
+        jawEntity?.move(to: Transform(
+            scale: .one,
+            rotation: simd_quatf(angle: jaw * 0.3, axis: [1, 0, 0]),
+            translation: [0, -0.1 - jaw * 0.03, 0.12]
+        ), relativeTo: headEntity, duration: 0.06, timingFunction: .easeInOut)
+
+        let browUp = w.browInnerUp * 0.06 - w.browDown * 0.03
+        let browScale: Float = 1.0 - w.browDown * 0.3
+
+        leftBrow?.move(to: Transform(
+            scale: [1, browScale, 1],
+            rotation: simd_quatf(angle: -browUp * 2, axis: [1, 0, 0]),
+            translation: [-0.06, 0.14 + browUp, 0.16]
+        ), relativeTo: headEntity, duration: 0.06, timingFunction: .easeInOut)
+
+        rightBrow?.move(to: Transform(
+            scale: [1, browScale, 1],
+            rotation: simd_quatf(angle: -browUp * 2, axis: [1, 0, 0]),
+            translation: [0.06, 0.14 + browUp, 0.16]
+        ), relativeTo: headEntity, duration: 0.06, timingFunction: .easeInOut)
+
+        let eyeScale: Float = 1.0 - w.eyeWide * 0.3
+        leftEye?.move(to: Transform(
+            scale: [1, max(eyeScale, 0.5), 1],
+            rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1),
+            translation: [-0.05, 0.05, 0.17]
+        ), relativeTo: headEntity, duration: 0.06, timingFunction: .easeInOut)
+
+        rightEye?.move(to: Transform(
+            scale: [1, max(eyeScale, 0.5), 1],
+            rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1),
+            translation: [0.05, 0.05, 0.17]
+        ), relativeTo: headEntity, duration: 0.06, timingFunction: .easeInOut)
     }
 }
 
 struct AvatarView: UIViewRepresentable {
     let emotion: String
     let mouthOpen: Float
-    let avatarUrl: String?
 
     func makeUIView(context: Context) -> ARView {
         context.coordinator.avatarScene.arView
     }
 
     func updateUIView(_ arView: ARView, context: Context) {
-        if let url = avatarUrl, !url.isEmpty {
-            context.coordinator.avatarScene.reloadAvatar(url: url)
-        }
         context.coordinator.avatarScene.applyExpression(emotion: emotion, mouthOpen: mouthOpen)
     }
 
@@ -131,6 +172,6 @@ struct AvatarView: UIViewRepresentable {
 }
 
 #Preview {
-    AvatarView(emotion: "warm", mouthOpen: 0, avatarUrl: nil)
+    AvatarView(emotion: "warm", mouthOpen: 0)
         .frame(height: 300)
 }
