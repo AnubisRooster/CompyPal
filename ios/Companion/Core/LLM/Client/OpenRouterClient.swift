@@ -79,6 +79,31 @@ actor OpenRouterClient {
         let resp = try await completeChat(model: model, messages: messages)
         return resp
     }
+
+    func generateImage(model: String, prompt: String) async throws -> Data {
+        let key = apiKey
+        let body = ImageRequest(model: model, prompt: prompt, n: 1, size: "1024x1024")
+        var req = URLRequest(url: URL(string: "\(baseURL)/images/generations")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw ClientError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let decoded = try decoder.decode(ImageResponse.self, from: data)
+
+        if let b64 = decoded.data.first?.b64Json, let imageData = Data(base64Encoded: b64) {
+            return imageData
+        }
+        if let urlStr = decoded.data.first?.url, let url = URL(string: urlStr) {
+            let (imageData, _) = try await session.data(from: url)
+            return imageData
+        }
+        throw ClientError.invalidResponse
+    }
 }
 
 enum ClientError: Error {

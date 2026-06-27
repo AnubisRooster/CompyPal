@@ -91,10 +91,24 @@ struct Delta: Codable {
 struct ImageRequest: Codable {
     let model: String
     let prompt: String
-    let inputReferences: [String]?
+    let n: Int?
+    let size: String?
 
     enum CodingKeys: String, CodingKey {
-        case model, prompt
-        case inputReferences = "input_references"
+        case model, prompt, n, size
+    }
+}
+
+struct ImageResponse: Codable {
+    let data: [ImageData]
+}
+
+struct ImageData: Codable {
+    let url: String?
+    let b64Json: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case b64Json = "b64_json"
     }
 }

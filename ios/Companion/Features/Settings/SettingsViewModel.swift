@@ -6,11 +6,18 @@ class SettingsViewModel: ObservableObject {
     @Published var connectionStatus: ConnectionStatus = .idle
     @Published var chatMode: ModelMode = .auto
     @Published var catalogStatus: CatalogStatus = .unknown
+    @Published var imageGenEnabled: Bool {
+        didSet { UserDefaults.standard.set(imageGenEnabled, forKey: "image_gen_enabled") }
+    }
 
     private let keychain = KeychainService()
     private let catalogFetcher = CatalogFetcher()
     private let catalogCache = CatalogCache()
     private let client = OpenRouterClient()
+
+    init() {
+        imageGenEnabled = UserDefaults.standard.bool(forKey: "image_gen_enabled")
+    }
 
     enum ConnectionStatus: Equatable {
         case idle, testing, success(String), failed(String)

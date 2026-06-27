@@ -9,6 +9,7 @@ class ChatViewModel: ObservableObject {
     @Published var isListening = false
     @Published var mouthOpen: Float = 0
     @Published var currentEmotion = "neutral"
+    @Published var referenceImageData: Data?
 
     var companion: CompanionInfo
     @Published var appearanceVersion = 0
@@ -22,6 +23,7 @@ class ChatViewModel: ObservableObject {
     private let audioRecorder = AudioRecorderService()
     private let appearanceParser: AppearanceIntentParser
     private let appearanceApplier: AppearanceApplier
+    private lazy var imageGenService = ImageGenerationService(client: client)
 
     private var userId: Int64 = 1
     private var chatCandidates: [CatalogEntry] = []
@@ -40,6 +42,7 @@ class ChatViewModel: ObservableObject {
         messages = recent.map { ChatMessage(role: $0.role, text: $0.text) }
         await loadApiKey()
         await loadChatCandidates()
+        referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
     }
 
     func sendText(_ text: String) async {
@@ -182,9 +185,23 @@ class ChatViewModel: ObservableObject {
             messages.append(confirmMsg)
             speakReply(confirmMsg.text)
         } else if let suggestion = result.suggestion {
-            let declineMsg = ChatMessage(role: "assistant", text: suggestion)
-            messages.append(declineMsg)
-            speakReply(declineMsg.text)
+            let imageGenOn = UserDefaults.standard.bool(forKey: "image_gen_enabled")
+            if imageGenOn, let attribute = delta.value {
+                let genMsg = ChatMessage(role: "assistant", text: "Generating a reference image for your requested look...")
+                messages.append(genMsg)
+
+                let prompt = "Portrait of a person with \(delta.attribute) set to \(attribute), consistent with current appearance: \(companion.appearance.map { "\($0.0): \($0.1)" }.joined(separator: ", "))"
+                if let _ = try? await imageGenService.generateForCompanion(companionId: companion.id, prompt: prompt, catalog: catalog) {
+                    referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
+                    let doneMsg = ChatMessage(role: "assistant", text: "Reference image generated and applied to your companion.")
+                    messages.append(doneMsg)
+                    appearanceVersion += 1
+                }
+            } else {
+                let declineMsg = ChatMessage(role: "assistant", text: suggestion)
+                messages.append(declineMsg)
+                speakReply(declineMsg.text)
+            }
         }
     }
 

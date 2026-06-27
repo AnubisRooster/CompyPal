@@ -5,7 +5,7 @@ import ARKit
 @MainActor
 class AvatarScene {
     let arView: ARView
-    private var headEntity: Entity?
+    private(set) var headEntity: Entity?
     private var jawEntity: Entity?
     private var leftBrow: Entity?
     private var rightBrow: Entity?
@@ -193,17 +193,38 @@ struct AvatarView: UIViewRepresentable {
     let emotion: String
     let mouthOpen: Float
     let appearance: [(String, String)]
+    let referenceImageData: Data?
 
     func makeUIView(context: Context) -> ARView {
         let scene = context.coordinator.avatarScene
         scene.applyAppearance(attributes: appearance)
+        if let data = referenceImageData {
+            context.coordinator.referenceHash = data.hashValue
+            applyTexture(data: data, scene: scene)
+        }
         return scene.arView
     }
 
     func updateUIView(_ arView: ARView, context: Context) {
         let scene = context.coordinator.avatarScene
         scene.applyAppearance(attributes: appearance)
+        if let data = referenceImageData, data.hashValue != context.coordinator.referenceHash {
+            context.coordinator.referenceHash = data.hashValue
+            applyTexture(data: data, scene: scene)
+        }
         scene.applyExpression(emotion: emotion, mouthOpen: mouthOpen)
+    }
+
+    private func applyTexture(data: Data, scene: AvatarScene) {
+        guard let image = UIImage(data: data), let cgImage = image.cgImage else { return }
+        Task { @MainActor in
+            guard let texture = try? await TextureResource.generate(from: cgImage, options: .init(semantic: .color)) else { return }
+            var mat = PhysicallyBasedMaterial()
+            mat.baseColor = .init(texture: MaterialParameters.Texture(texture))
+            mat.roughness = 0.8
+            guard let head = scene.headEntity as? ModelEntity else { return }
+            head.model?.materials = [mat]
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -213,10 +234,11 @@ struct AvatarView: UIViewRepresentable {
     @MainActor
     class Coordinator {
         let avatarScene = AvatarScene()
+        var referenceHash: Int = 0
     }
 }
 
 #Preview {
-    AvatarView(emotion: "warm", mouthOpen: 0, appearance: [("skin_tone", "light"), ("eye_color", "blue"), ("hair_color", "brown")])
+    AvatarView(emotion: "warm", mouthOpen: 0, appearance: [("skin_tone", "light"), ("eye_color", "blue"), ("hair_color", "brown")], referenceImageData: nil)
         .frame(height: 300)
 }

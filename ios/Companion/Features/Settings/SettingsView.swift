@@ -78,6 +78,13 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Experimental") {
+                Toggle("Image Generation", isOn: $viewModel.imageGenEnabled)
+                Text("When enabled, the companion can generate a reference image for appearance changes outside the parametric space. Uses a paid image model. Disabled by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Danger Zone") {
                 Button("Delete API Key", role: .destructive) {
                     showConfirmation = true
