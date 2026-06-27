@@ -9,6 +9,7 @@ class ChatViewModel: ObservableObject {
     @Published var isListening = false
     @Published var mouthOpen: Float = 0
     @Published var avatarUrl: String?
+    @Published var connectionState: APIClient.ConnectionState = .disconnected
     @Published var companionId: String
     @Published var userId: String
 
@@ -21,6 +22,20 @@ class ChatViewModel: ObservableObject {
     init(companionId: String, userId: String) {
         self.companionId = companionId
         self.userId = userId
+
+        Task {
+            await apiClient.setConnectionHandler { [weak self] state in
+                Task { @MainActor in
+                    self?.connectionState = state
+                    if state == .connected {
+                        self?.messages.append(ChatMessage(role: "system", text: "Connected"))
+                    } else if state == .reconnecting {
+                        self?.messages.append(ChatMessage(role: "system", text: "Reconnecting..."))
+                    }
+                }
+            }
+        }
+
         connect()
     }
 

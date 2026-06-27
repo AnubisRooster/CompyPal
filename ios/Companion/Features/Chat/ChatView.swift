@@ -10,6 +10,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            connectionBanner
             avatarSection
 
             ScrollView {
@@ -23,6 +24,42 @@ struct ChatView: View {
 
             inputBar
         }
+    }
+
+    private var connectionBanner: some View {
+        Group {
+            switch viewModel.connectionState {
+            case .reconnecting:
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Reconnecting...")
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(4)
+                .background(.orange.opacity(0.2))
+            case .disconnected:
+                Text("Disconnected")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                    .padding(4)
+                    .background(.red.opacity(0.2))
+            case .connecting:
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Connecting...")
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(4)
+                .background(.blue.opacity(0.1))
+            case .connected:
+                EmptyView()
+            }
+        }
+        .animation(.easeInOut, value: viewModel.connectionState)
     }
 
     private var avatarSection: some View {
@@ -87,6 +124,7 @@ struct MessageBubble: View {
                 Text(message.text)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
             }
         }
     }

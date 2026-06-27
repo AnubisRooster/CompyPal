@@ -1,17 +1,19 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, Query
-from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.companions import router as companions_router
 from app.api.health import router as health_router
 from app.config import settings
 from app.graph.schema import ensure_constraints
+from app.services.logging import RequestLogMiddleware, setup_logging
+from app.services.ratelimit import RateLimitMiddleware
 from app.ws.chat import handle_chat
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
     await ensure_constraints()
     yield
     from app.graph import close_driver
@@ -19,6 +21,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestLogMiddleware)
+
+from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,

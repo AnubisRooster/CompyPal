@@ -1,13 +1,15 @@
 import Foundation
 import AVFoundation
+import CryptoKit
 
 @MainActor
 class AudioPlayerService {
     private var audioEngine = AVAudioEngine()
     private var playerNode = AVAudioPlayerNode()
     private var isPlaying = false
-    private var amplitudeTimer: Timer?
     @Published private(set) var averagePower: Float = 0
+
+    private static let bufferCache = NSCache<NSString, AVAudioPCMBuffer>()
 
     init() {
         setupAudioSession()
@@ -39,9 +41,21 @@ class AudioPlayerService {
     }
 
     func playChunk(base64Data: String) {
+        let cacheKey = NSString(string: String(base64Data.prefix(64)))
+
+        if let cached = Self.bufferCache.object(forKey: cacheKey) {
+            scheduleAndPlay(cached)
+            return
+        }
+
         guard let data = Data(base64Encoded: base64Data),
               let buffer = decodeAudioData(data) else { return }
 
+        Self.bufferCache.setObject(buffer, forKey: cacheKey)
+        scheduleAndPlay(buffer)
+    }
+
+    private func scheduleAndPlay(_ buffer: AVAudioPCMBuffer) {
         if !audioEngine.isRunning {
             try? audioEngine.start()
         }
