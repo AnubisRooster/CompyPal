@@ -10,58 +10,48 @@ This matters specifically because you will be tempted to scaffold everything at 
 
 ## Project in one paragraph
 
-iOS app of interactive AI companions. Each companion has a persistent personality (LLM-driven), a realistic avatar whose appearance the user can change by request, voice interaction, and long-term memory backed by a Neo4j knowledge graph. The memory depth is the differentiator — lean on the graph from Phase 1.
+iOS app of interactive AI companions. Everything runs on-device — the only external dependency is OpenRouter (the user brings their own API key). Each companion has an LLM-driven personality, a 3D parametric avatar in RealityKit, voice interaction via AVFoundation, and long-term memory in an embedded GRDB.swift (SQLite) graph. The memory depth is the differentiator — lean on the graph from Phase 1.
 
 ## Stack (do not substitute without asking)
 
 - **iOS:** Swift 5.9+, SwiftUI, RealityKit + ARKit, AVFoundation. Min target iOS 17.
-- **Backend:** Python 3.11, FastAPI, async throughout, WebSocket for conversational streaming.
-- **Graph:** Neo4j 5.x. All Cypher lives in `backend/app/graph/` — never in route handlers.
-- **Runtime LLM (the companion's brain):** Anthropic Claude via the official SDK. This is separate from the model running *you* (the coding agent). Don't conflate them.
-- **TTS:** ElevenLabs. **STT:** Apple `Speech` on-device, Whisper fallback. **Avatar:** Ready Player Me.
+- **LLM provider:** OpenRouter (BYOK), OpenAI-compatible API, SSE streaming.
+- **Graph:** SQLite via GRDB.swift. All queries live in `Core/Memory/` — never in view models.
+- **Runtime LLM (the companion's brain):** Resolved from the live OpenRouter catalog by a cost-first selection policy, not hardcoded.
+- **TTS:** AVSpeechSynthesizer (on-device). **STT:** Apple `Speech` framework (on-device, whisper.cpp optional Phase 4).
+- **Avatar:** Bundled parametric meshes in RealityKit, driven by morph targets + material swaps.
 
 ## Commands
 
 ```bash
-# Infra (Neo4j + backend)
-docker-compose up -d
-
-# Backend
-cd backend && uv sync           # or: pip install -e .
-uvicorn app.main:app --reload   # serves on :8000
-pytest                          # run tests
-
 # Regenerate Xcode project (after changing project.yml)
 cd ios && xcodegen generate
 
 # iOS — open ios/Companion.xcodeproj in Xcode, or:
 cd ios && xcodebuild -scheme Companion -destination 'platform=iOS Simulator,name=iPhone 17' build
+
+# Run tests
+cd ios && xcodebuild test -scheme Companion -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 ## Code conventions
 
-**Python**
-- Type hints everywhere. Pydantic v2 for all request/response models.
-- Services are stateless and dependency-injected. Never instantiate API clients inside route handlers.
-- All Neo4j access goes through `backend/app/graph/`. No raw Cypher elsewhere.
-- Async I/O throughout. Pool the Neo4j driver.
-
 **Swift**
 - SwiftUI + MVVM, one `ObservableObject` view model per feature.
-- All networking through a single `APIClient` actor. No ad-hoc `URLSession` calls in views.
+- All provider traffic through `Core/LLM/Client/OpenRouterClient` actor. No ad-hoc `URLSession` calls in views.
+- All graph access through `Core/Memory/`. No raw SQL outside that directory.
 - Everything `Codable`. No force-unwraps in production paths.
-- Cache meshes/textures/audio via `NSCache` with disk fallback, keyed by content hash.
-
-**Both**
-- Keep DTOs in sync between `backend/app/models` (Pydantic) and `ios/.../Core/Models` (Codable). If you change one, change the other in the same commit.
-- Write tests for core logic as you go. Priority units: persona assembly, memory dedup, appearance-delta application.
+- Cache meshes/textures/audio/catalog via `NSCache` + disk, keyed by content hash / role.
+- Catalog parsing and selection policy are pure and unit-tested; no network code inside the policy.
 
 ## Hard don'ts
 
-- **Don't hardcode secrets.** Everything comes from env. Keep `.env.example` complete with blank values.
-- **Don't invent model IDs, SDK method names, or external API parameters.** The ElevenLabs, Ready Player Me, Anthropic, and Neo4j APIs change. When you're unsure of a parameter or model string, check current official docs before writing it. A confident wrong API call costs more than a lookup.
-- **Don't store appearance as raw images.** Appearance is structured attributes in the graph; images/meshes are derived artifacts cached by attribute hash. This keeps partial updates ("change only the hair") tractable.
+- **Don't hardcode secrets.** API key comes from the iOS Keychain, entered in-app. No .env files, no plist secrets.
+- **Don't hardcode model IDs.** Resolve from the live catalog at runtime. Ship seed defaults only as cold-start hints that are re-validated against the fetched catalog.
+- **Don't invent model IDs, SDK method names, or external API parameters.** When unsure of an OpenRouter API shape or a framework API, check current official docs.
+- **Don't store appearance as raw images.** Appearance is structured attributes in the graph; images/meshes are derived artifacts cached by attribute hash.
 - **Don't skip the retrieval step.** Before every companion LLM call, query the graph for salient memories and inject them. That's the product.
+- **Don't build a backend server.** The app has no backend — everything runs on the iPhone.
 
 ## Notes on you, the agent (DeepSeek V4)
 

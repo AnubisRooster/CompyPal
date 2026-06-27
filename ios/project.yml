@@ -13,7 +13,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Companion
+      - path: Companion
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: ai.companion.app
       INFOPLIST_FILE: Companion/Info.plist
@@ -21,10 +21,6 @@ targets:
       CODE_SIGN_STYLE: Automatic
       MARKETING_VERSION: "0.1.0"
       CURRENT_PROJECT_VERSION: "${BUILD_NUMBER:-1}"
-    entitlements:
-      path: Companion/Companion.entitlements
-      properties:
-        com.apple.developer.applesignin: ["Default"]
     info:
       path: Companion/Info.plist
       properties:
@@ -53,5 +49,6 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: ai.companion.tests
       TEST_TARGET_NAME: Companion
+      GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Companion
