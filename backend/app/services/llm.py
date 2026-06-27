@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
@@ -7,8 +8,31 @@ from app.config import settings
 
 _client: AsyncAnthropic | None = None
 
-
 _MODEL_ID = "claude-sonnet-4-20250514"
+
+APPEARANCE_TOOL: dict[str, Any] = {
+    "name": "update_appearance",
+    "description": (
+        "Update the companion's appearance based on the user's request. "
+        "Call this when the user asks to change something about how the companion looks. "
+        "The companion should acknowledge the change in its next response."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "deltas": {
+                "type": "object",
+                "description": (
+                    "Key-value pairs of appearance attributes to change. "
+                    "Common keys: hair_color, hair_style, eye_color, skin_color, "
+                    "beard_style, glasses, outfit. Values are free-text descriptions."
+                ),
+                "additionalProperties": {"type": "string"},
+            }
+        },
+        "required": ["deltas"],
+    },
+}
 
 
 def get_client() -> AsyncAnthropic:
@@ -21,6 +45,7 @@ def get_client() -> AsyncAnthropic:
 async def stream_chat(
     system_prompt: str,
     messages: list[dict],
+    tools: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     client = get_client()
     async with client.messages.stream(
@@ -28,10 +53,35 @@ async def stream_chat(
         max_tokens=1024,
         system=system_prompt,
         messages=messages,
+        tools=tools,
     ) as stream:
         async for chunk in stream:
             if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
                 yield chunk.delta.text
+
+
+async def detect_appearance_change(
+    system_prompt: str,
+    messages: list[dict],
+) -> dict[str, Any] | None:
+    client = get_client()
+    try:
+        response = await client.messages.create(
+            model=_MODEL_ID,
+            max_tokens=256,
+            system=system_prompt + (
+                "\n\nIf the user is asking to change your appearance, use the "
+                "update_appearance tool to record the changes."
+            ),
+            messages=messages,
+            tools=[APPEARANCE_TOOL],
+        )
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "update_appearance":
+                return block.input
+    except Exception:
+        pass
+    return None
 
 
 async def extract_memories_from_turn(

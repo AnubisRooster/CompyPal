@@ -1,6 +1,6 @@
 import Foundation
 
-struct Trait: Codable {
+struct Trait: Codable, Hashable {
     let name: String
     let intensity: Double
 }
@@ -25,7 +25,7 @@ struct CreateCompanionResponse: Codable {
     }
 }
 
-struct CompanionState: Codable {
+struct CompanionState: Codable, Hashable {
     let companionId: String
     let name: String
     let traits: [Trait]

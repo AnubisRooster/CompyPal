@@ -32,8 +32,16 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
-        NSMicrophoneUsageDescription: "The companion needs microphone access for voice chat."
+        NSMicrophoneUsageDescription: "Companion needs microphone access for voice chat."
+        NSSpeechRecognitionUsageDescription: "Companion uses speech recognition to transcribe your voice."
     dependencies: []
+    preBuildScripts:
+      - name: "Regenerate XcodeGen"
+        script: |
+          if which xcodegen >/dev/null 2>&1; then
+            xcodegen generate
+          fi
+        basedOnDependencyAnalysis: false
 
   CompanionTests:
     type: bundle.unit-test

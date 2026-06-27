@@ -5,14 +5,40 @@ struct ContentView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
 
     var body: some View {
-        VStack(spacing: 24) {
+        Group {
             if authViewModel.isAuthenticated {
-                connectionStatus
+                mainTabView
             } else {
                 signInView
             }
         }
-        .padding()
+    }
+
+    private var mainTabView: some View {
+        TabView {
+            NavigationStack {
+                ChatView(companionId: "default-companion", userId: authViewModel.userName ?? "user")
+                    .navigationTitle("Companion")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Sign Out") { authViewModel.signOut() }
+                        }
+                    }
+            }
+            .tabItem { Label("Chat", systemImage: "message.fill") }
+
+            NavigationStack {
+                CompanionListView()
+                    .navigationTitle("Companions")
+            }
+            .tabItem { Label("Companions", systemImage: "person.2.fill") }
+
+            NavigationStack {
+                SettingsView()
+                    .navigationTitle("Settings")
+            }
+            .tabItem { Label("Settings", systemImage: "gear") }
+        }
     }
 
     private var signInView: some View {
@@ -37,29 +63,59 @@ struct ContentView: View {
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 40)
         }
+        .padding()
     }
+}
 
-    private var connectionStatus: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.green)
+struct CompanionListView: View {
+    @State private var companions: [CompanionState] = []
+    @State private var showingCreate = false
 
-            Text("Connected")
-                .font(.title)
-                .bold()
-
-            if authViewModel.isBackendHealthy {
-                Label("Backend reachable", systemImage: "checkmark")
-                    .foregroundStyle(.green)
-            } else {
-                ProgressView("Checking backend...")
+    var body: some View {
+        List(companions, id: \.companionId) { comp in
+            NavigationLink(comp.name, value: comp)
+        }
+        .navigationDestination(for: CompanionState.self) { comp in
+            ChatView(companionId: comp.companionId, userId: "user")
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New", systemImage: "plus") { showingCreate = true }
             }
+        }
+        .sheet(isPresented: $showingCreate) {
+            CreateCompanionView()
+        }
+    }
+}
 
-            Button("Sign Out") {
-                authViewModel.signOut()
+struct SettingsView: View {
+    var body: some View {
+        List {
+            Section("Connection") {
+                Label("Backend: localhost:8000", systemImage: "network")
             }
-            .buttonStyle(.bordered)
+            Section("About") {
+                Label("Version 0.1.0", systemImage: "info.circle")
+            }
+        }
+    }
+}
+
+struct CreateCompanionView: View {
+    @Environment(\.dismiss) var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Name", text: $name)
+            }
+            .navigationTitle("New Companion")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Create") { dismiss() } }
+            }
         }
     }
 }

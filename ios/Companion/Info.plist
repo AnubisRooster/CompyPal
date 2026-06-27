@@ -21,7 +21,9 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>The companion needs microphone access for voice chat.</string>
+	<string>Companion needs microphone access for voice chat.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Companion uses speech recognition to transcribe your voice.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
