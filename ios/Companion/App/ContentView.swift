@@ -10,8 +10,7 @@ struct ContentView: View {
             .tabItem { Label("Chat", systemImage: "message.fill") }
 
             NavigationStack {
-                CompanionListView()
-                    .navigationTitle("Companions")
+                CompanionsView()
             }
             .tabItem { Label("Companions", systemImage: "person.2.fill") }
 
@@ -39,14 +38,6 @@ struct ChatPlaceholderView: View {
     }
 }
 
-struct CompanionListView: View {
-    var body: some View {
-        ContentUnavailableView(
-            "No Companions",
-            systemImage: "person.slash",
-            description: Text("Create a companion to get started.")
-        )
-    }
-}
+
 
 #Preview { ContentView() }

@@ -5,6 +5,11 @@ options:
     iOS: "17.0"
   xcodeVersion: "15.0"
 
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: 6.29.0
+
 settings:
   SWIFT_VERSION: "5.9"
 
@@ -32,7 +37,8 @@ targets:
         UIApplicationSupportsIndirectInputEvents: true
         NSMicrophoneUsageDescription: "Companion needs microphone access for voice chat."
         NSSpeechRecognitionUsageDescription: "Companion uses speech recognition to transcribe your voice."
-    dependencies: []
+    dependencies:
+      - package: GRDB
     preBuildScripts:
       - name: "Regenerate XcodeGen"
         script: |
