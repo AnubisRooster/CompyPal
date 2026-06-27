@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     app_name: str = "Companion API"
-    debug: bool = False
+    app_env: str = "development"
+    debug: bool = True
 
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"

@@ -6,6 +6,7 @@ from app.api.companions import router as companions_router
 from app.api.health import router as health_router
 from app.config import settings
 from app.graph.schema import ensure_constraints
+from app.services.envcheck import validate_env
 from app.services.logging import RequestLogMiddleware, setup_logging
 from app.services.ratelimit import RateLimitMiddleware
 from app.ws.chat import handle_chat
@@ -14,6 +15,7 @@ from app.ws.chat import handle_chat
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    validate_env()
     await ensure_constraints()
     yield
     from app.graph import close_driver
