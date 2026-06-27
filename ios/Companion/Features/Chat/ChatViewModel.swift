@@ -10,7 +10,8 @@ class ChatViewModel: ObservableObject {
     @Published var mouthOpen: Float = 0
     @Published var currentEmotion = "neutral"
 
-    let companion: CompanionInfo
+    var companion: CompanionInfo
+    @Published var appearanceVersion = 0
 
     private let store = MemoryStore()
     private let client = OpenRouterClient()
@@ -19,6 +20,8 @@ class ChatViewModel: ObservableObject {
     private let catalogCache = CatalogCache()
     private let ttsEngine = TTSEngine()
     private let audioRecorder = AudioRecorderService()
+    private let appearanceParser: AppearanceIntentParser
+    private let appearanceApplier: AppearanceApplier
 
     private var userId: Int64 = 1
     private var chatCandidates: [CatalogEntry] = []
@@ -27,6 +30,8 @@ class ChatViewModel: ObservableObject {
     init(companion: CompanionInfo) {
         self.companion = companion
         self.extractor = MemoryExtractor(client: client, store: store)
+        self.appearanceParser = AppearanceIntentParser(client: client)
+        self.appearanceApplier = AppearanceApplier(store: store)
     }
 
     func load() async {
@@ -99,6 +104,7 @@ class ChatViewModel: ObservableObject {
             )
         }
         await checkStagePromotion()
+        await handleAppearanceIntent(userText: trimmed, catalog: catalog)
         speakReply(fullReply)
     }
 
@@ -156,6 +162,30 @@ class ChatViewModel: ObservableObject {
         ttsEngine.stop()
         isSpeaking = false
         mouthOpen = 0
+    }
+
+    private func handleAppearanceIntent(userText: String, catalog: [CatalogEntry]) async {
+        guard let delta = try? await appearanceParser.parse(
+            userText: userText,
+            currentAppearance: companion.appearance,
+            catalog: catalog
+        ) else { return }
+
+        let result = (try? await appearanceApplier.apply(delta: delta, companionId: companion.id)) ?? delta
+
+        if let value = result.value, result.declined != true {
+            let updated = try? await store.companion(id: companion.id)
+            companion = updated ?? companion
+            appearanceVersion += 1
+
+            let confirmMsg = ChatMessage(role: "assistant", text: "Got it! Changing \(result.attribute) to \(value).")
+            messages.append(confirmMsg)
+            speakReply(confirmMsg.text)
+        } else if let suggestion = result.suggestion {
+            let declineMsg = ChatMessage(role: "assistant", text: suggestion)
+            messages.append(declineMsg)
+            speakReply(declineMsg.text)
+        }
     }
 
     private func loadApiKey() async {

@@ -109,6 +109,46 @@ class AvatarScene {
         anchor.addChild(fill)
     }
 
+    func applyAppearance(attributes: [(String, String)]) {
+        for (key, value) in attributes {
+            switch key {
+            case "skin_tone":
+                if let color = ParametricSchema.shared.color(for: "skin_tone", value: value) {
+                    updateMaterial(on: headEntity, color: color)
+                    updateMaterial(on: jawEntity, color: color)
+                }
+            case "eye_color":
+                if let color = ParametricSchema.shared.color(for: "eye_color", value: value) {
+                    updatePupilColor(color: color)
+                }
+            case "hair_color":
+                if let color = ParametricSchema.shared.color(for: "hair_color", value: value) {
+                    updateMaterial(on: leftBrow, color: color)
+                    updateMaterial(on: rightBrow, color: color)
+                }
+            default: break
+            }
+        }
+    }
+
+    private func updateMaterial(on entity: Entity?, color: UIColor) {
+        guard let model = entity as? ModelEntity else { return }
+        var mat = SimpleMaterial(color: color, isMetallic: false)
+        mat.roughness = 0.6
+        model.model?.materials = [mat]
+    }
+
+    private func updatePupilColor(color: UIColor) {
+        for child in [leftEye, rightEye] {
+            guard let eye = child else { continue }
+            for pupil in eye.children {
+                guard let model = pupil as? ModelEntity else { continue }
+                let mat = SimpleMaterial(color: color, isMetallic: false)
+                model.model?.materials = [mat]
+            }
+        }
+    }
+
     func applyExpression(emotion: String, mouthOpen: Float) {
         let w = BlendShapeWeights.weights(for: emotion)
         let jaw = max(w.jawOpen, w.mouthOpen, mouthOpen)
@@ -152,13 +192,18 @@ class AvatarScene {
 struct AvatarView: UIViewRepresentable {
     let emotion: String
     let mouthOpen: Float
+    let appearance: [(String, String)]
 
     func makeUIView(context: Context) -> ARView {
-        context.coordinator.avatarScene.arView
+        let scene = context.coordinator.avatarScene
+        scene.applyAppearance(attributes: appearance)
+        return scene.arView
     }
 
     func updateUIView(_ arView: ARView, context: Context) {
-        context.coordinator.avatarScene.applyExpression(emotion: emotion, mouthOpen: mouthOpen)
+        let scene = context.coordinator.avatarScene
+        scene.applyAppearance(attributes: appearance)
+        scene.applyExpression(emotion: emotion, mouthOpen: mouthOpen)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -172,6 +217,6 @@ struct AvatarView: UIViewRepresentable {
 }
 
 #Preview {
-    AvatarView(emotion: "warm", mouthOpen: 0)
+    AvatarView(emotion: "warm", mouthOpen: 0, appearance: [("skin_tone", "light"), ("eye_color", "blue"), ("hair_color", "brown")])
         .frame(height: 300)
 }

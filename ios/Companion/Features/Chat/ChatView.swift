@@ -50,7 +50,8 @@ struct ChatView: View {
     }
 
     private var avatarSection: some View {
-        AvatarView(emotion: viewModel.currentEmotion, mouthOpen: viewModel.mouthOpen)
+        AvatarView(emotion: viewModel.currentEmotion, mouthOpen: viewModel.mouthOpen, appearance: viewModel.companion.appearance)
+            .id(viewModel.appearanceVersion)
             .frame(height: 200)
             .overlay(alignment: .topTrailing) {
                 if viewModel.isSpeaking {

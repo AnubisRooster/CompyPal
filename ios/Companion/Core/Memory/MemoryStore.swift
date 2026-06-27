@@ -139,6 +139,20 @@ final class MemoryStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Appearance
+
+    func updateAppearance(companionId: Int64, key: String, value: String) async throws {
+        let queue = try await db.open()
+        try await queue.write { db in
+            let existing = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM appearance_attribute WHERE companion_id = ? AND key = ?", arguments: [companionId, key]) ?? 0
+            if existing > 0 {
+                try db.execute(sql: "UPDATE appearance_attribute SET value = ? WHERE companion_id = ? AND key = ?", arguments: [value, companionId, key])
+            } else {
+                try db.execute(sql: "INSERT INTO appearance_attribute (companion_id, key, value) VALUES (?, ?, ?)", arguments: [companionId, key, value])
+            }
+        }
+    }
+
     // MARK: - Relationship
 
     func relationshipStage(companionId: Int64) async throws -> String {
