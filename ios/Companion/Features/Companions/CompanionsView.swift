@@ -5,6 +5,11 @@ struct CompanionsView: View {
     @State private var showSettings = false
     @State private var showNewCompanion = false
     @State private var selectedCompanion: CompanionInfo?
+    let onCompanionSelected: ((CompanionInfo) -> Void)?
+
+    init(onCompanionSelected: ((CompanionInfo) -> Void)? = nil) {
+        self.onCompanionSelected = onCompanionSelected
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,6 +31,7 @@ struct CompanionsView: View {
                         ForEach(viewModel.companions) { companion in
                             Button {
                                 selectedCompanion = companion
+                                onCompanionSelected?(companion)
                             } label: {
                                 CompanionRow(companion: companion)
                             }
@@ -131,11 +137,8 @@ struct AvatarThumbnail: View {
             }
         }
         .task {
-            let store = MemoryStore()
-            if let record = try? await store.companion(id: companionId) {
-                let imageGenService = ImageGenerationService(client: OpenRouterClient())
-                imageData = await imageGenService.cachedImageData(companionId: companionId)
-            }
+            let imageGenService = ImageGenerationService(client: OpenRouterClient())
+            imageData = await imageGenService.cachedImageData(companionId: companionId)
         }
     }
 }

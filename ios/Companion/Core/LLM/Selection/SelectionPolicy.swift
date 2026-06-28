@@ -13,7 +13,7 @@ struct SelectionPolicy {
             if aFree != bFree { return aFree }
             return totalCost(a) < totalCost(b)
         }
-        if let pinned = pinnedModelId, let match = catalog.first(where: { $0.id == pinned }) {
+        if let pinned = pinnedModelId, let match = filtered.first(where: { $0.id == pinned }) {
             return [match] + sorted.filter { $0.id != pinned }
         }
         return sorted
@@ -24,16 +24,19 @@ struct SelectionPolicy {
     private func meetsRequirements(_ entry: CatalogEntry, for role: ModelRole) -> Bool {
         switch role {
         case .chat:
-            return entry.modalities?.output?.contains("text") ?? false
+            guard let arch = entry.architecture else { return true }
+            return arch.outputModalities?.contains("text") ?? true
         case .extract:
-            return entry.supportedParameters?.contains("tools") ?? false
+            guard let arch = entry.architecture else { return true }
+            return arch.outputModalities?.contains("text") ?? true
         case .image:
-            return entry.modalities?.output?.contains("image") ?? false
+            if entry.architecture?.outputModalities?.contains("image") == true { return true }
+            return entry.supportedParameters?.contains("input_references") ?? false
         }
     }
 
     private func isFree(_ entry: CatalogEntry) -> Bool {
-        entry.pricing.prompt == 0 && entry.pricing.completion == 0
+        entry.pricing.prompt == 0 && entry.pricing.completion == 0 && (entry.pricing.image ?? 0) == 0
     }
 
     private func totalCost(_ entry: CatalogEntry) -> Double {

@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -31,6 +32,11 @@ class ChatViewModel: ObservableObject {
     private var chatCandidates: [CatalogEntry] = []
     private var pendingTranscript = ""
     private var streamTask: Task<Void, Never>?
+
+    private let intentKeywords: Set<String> = [
+        "change", "make", "give", "try", "new", "look", "style", "hair", "color", "eye", "skin",
+        "appearance", "different", "cut", "dye", "wear", "shirt", "outfit", "dress"
+    ]
 
     init(companion: CompanionInfo) {
         self.companion = companion
@@ -83,39 +89,34 @@ class ChatViewModel: ObservableObject {
 
         streamTask = Task {
             var fullReply = ""
-            var succeeded = false
 
             for candidate in chatCandidates {
                 guard isStreaming else { break }
                 do {
                     let chatMessages = buildChatMessages(system: systemPrompt, history: messages, newUserText: trimmed)
                     var streamed = ""
-                    let start = CFAbsoluteTimeGetCurrent()
                     for try await delta in await client.streamChat(model: candidate.id, messages: chatMessages) {
                         try Task.checkCancellation()
                         streamed += delta
                         fullReply += delta
                         messages[msgIndex].text = streamed
-                        if CFAbsoluteTimeGetCurrent() - start < 0.1 {
-                            try await Task.sleep(nanoseconds: 10_000_000)
-                        }
                     }
-                    succeeded = true
                     break
                 } catch is CancellationError {
                     return
                 } catch {
                     errorMessage = "\(candidate.id) failed: \(error.localizedDescription)"
-                    try? await catalogCache.clear()
                     continue
                 }
             }
 
             isStreaming = false
 
-            guard succeeded, !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
-                if !succeeded {
-                    messages[msgIndex].text = "⚠️ All models failed. Check your API key or try refreshing the model catalog."
+            guard !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
+                if chatCandidates.isEmpty {
+                    messages[msgIndex].text = "⚠️ No models available. Refresh the model catalog in Settings."
+                } else {
+                    messages[msgIndex].text = "⚠️ All models failed. Check your API key or the model catalog."
                 }
                 return
             }
@@ -129,8 +130,10 @@ class ChatViewModel: ObservableObject {
                     userText: trimmed, assistantText: fullReply, catalog: catalog
                 )
             }
-            await checkStagePromotion()
-            await handleAppearanceIntent(userText: trimmed, catalog: catalog)
+            await checkStagePromotion(liveTurnCount: (try? await store.liveTurnCount(companionId: companion.id)) ?? 0)
+            if hasAppearanceIntent(text: trimmed) {
+                await handleAppearanceIntent(userText: trimmed, catalog: catalog)
+            }
             speakReply(fullReply)
         }
     }
@@ -170,6 +173,10 @@ class ChatViewModel: ObservableObject {
     }
 
     private func speakReply(_ text: String) {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default)
+        try? session.setActive(true)
+
         ttsEngine.speak(
             text,
             voiceId: "com.apple.voice.compact.en-US.Samantha",
@@ -201,6 +208,11 @@ class ChatViewModel: ObservableObject {
         mouthOpen = 0
     }
 
+    private func hasAppearanceIntent(text: String) -> Bool {
+        let lower = text.lowercased()
+        return intentKeywords.contains { lower.contains($0) }
+    }
+
     private func handleAppearanceIntent(userText: String, catalog: [CatalogEntry]) async {
         guard let delta = try? await appearanceParser.parse(
             userText: userText,
@@ -225,7 +237,10 @@ class ChatViewModel: ObservableObject {
                 messages.append(genMsg)
 
                 let prompt = "Portrait of a person with \(delta.attribute) set to \(attribute), consistent with current appearance: \(companion.appearance.map { "\($0.0): \($0.1)" }.joined(separator: ", "))"
-                if let _ = try? await imageGenService.generateForCompanion(companionId: companion.id, prompt: prompt, catalog: catalog) {
+                if let refURL = await imageGenService.cachedImageURL(companionId: companion.id),
+                   let _ = try? await imageGenService.generateForCompanion(
+                    companionId: companion.id, prompt: prompt, catalog: catalog, referenceURL: refURL
+                ) {
                     referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
                     let doneMsg = ChatMessage(role: "assistant", text: "Reference image generated and applied to your companion.")
                     messages.append(doneMsg)
@@ -252,17 +267,6 @@ class ChatViewModel: ObservableObject {
         if let cached = await catalogCache.load() {
             chatCandidates = SelectionPolicy(role: .chat, catalog: cached.entries, pinnedModelId: nil).rank()
         }
-        if chatCandidates.isEmpty {
-            let seed = CatalogEntry(
-                id: "openai/gpt-4o-mini",
-                name: "GPT-4o Mini",
-                pricing: .zero,
-                contextLength: 128000,
-                modalities: Modalities(input: ["text"], output: ["text"]),
-                supportedParameters: ["streaming", "tools"]
-            )
-            chatCandidates = [seed]
-        }
     }
 
     private func buildChatMessages(system: String, history: [ChatMessage], newUserText: String) -> [Message] {
@@ -274,13 +278,14 @@ class ChatViewModel: ObservableObject {
         return msgs
     }
 
-    private func checkStagePromotion() async {
+    private func checkStagePromotion(liveTurnCount: Int) async {
         let stageThresholds: [(String, Int)] = [
             ("acquaintance", 5),
             ("friend", 20),
         ]
+        let currentStage = (try? await store.relationshipStage(companionId: companion.id)) ?? "acquaintance"
         for (stage, threshold) in stageThresholds {
-            if companion.relationshipStage == stage, companion.turnCount >= threshold {
+            if currentStage == stage, liveTurnCount >= threshold {
                 try? await store.promoteStage(companionId: companion.id)
             }
         }

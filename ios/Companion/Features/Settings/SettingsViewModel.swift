@@ -53,14 +53,16 @@ class SettingsViewModel: ObservableObject {
             guard !key.isEmpty else { throw ClientError.noKey }
             await client.setKey(key)
 
-            let modelId: String
-            if let cached = await catalogCache.load(), !cached.entries.isEmpty {
-                let policy = SelectionPolicy(role: .chat, catalog: cached.entries, pinnedModelId: nil)
-                modelId = policy.best()?.id ?? "openai/gpt-4o-mini"
-            } else {
-                modelId = "openai/gpt-4o-mini"
+            guard let cached = await catalogCache.load(), !cached.entries.isEmpty else {
+                connectionStatus = .failed("No cached model catalog. Refresh models first.")
+                return
             }
-            let reply = try await client.testConnection(model: modelId)
+            let policy = SelectionPolicy(role: .chat, catalog: cached.entries, pinnedModelId: nil)
+            guard let model = policy.best() else {
+                connectionStatus = .failed("No suitable chat model found in catalog.")
+                return
+            }
+            let reply = try await client.testConnection(model: model.id)
             connectionStatus = .success(reply)
         } catch {
             connectionStatus = .failed(error.localizedDescription)

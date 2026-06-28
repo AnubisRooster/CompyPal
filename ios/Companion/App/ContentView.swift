@@ -1,16 +1,24 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var recentCompanion: CompanionInfo?
+
     var body: some View {
         TabView {
             NavigationStack {
-                ChatPlaceholderView()
-                    .navigationTitle("Companion")
+                if let companion = recentCompanion {
+                    ChatView(companion: companion)
+                } else {
+                    ChatPlaceholderView()
+                        .navigationTitle("Companion")
+                }
             }
             .tabItem { Label("Chat", systemImage: "message.fill") }
 
             NavigationStack {
-                CompanionsView()
+                CompanionsView(onCompanionSelected: { companion in
+                    recentCompanion = companion
+                })
             }
             .tabItem { Label("Companions", systemImage: "person.2.fill") }
 
@@ -29,15 +37,8 @@ struct ChatPlaceholderView: View {
             Image(systemName: "character.bubble.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.tint)
-            Text("Add an API key in Settings")
+            Text("Select a companion to start chatting")
                 .foregroundStyle(.secondary)
-            Text("then create a companion to start chatting.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
     }
 }
-
-
-
-#Preview { ContentView() }

@@ -24,12 +24,26 @@ actor AppearanceIntentParser {
         ]
 
         let raw = try await client.completeChat(model: model.id, messages: messages)
-        guard let data = raw.data(using: .utf8),
+        let cleaned = Self.stripCodeFences(raw)
+        guard let data = cleaned.data(using: .utf8),
               let parsed = try? JSONDecoder().decode(ParsedIntent.self, from: data),
               !parsed.attribute.isEmpty
         else { return nil }
 
         return AppearanceDelta(attribute: parsed.attribute, value: parsed.value, declined: nil, suggestion: nil)
+    }
+
+    static func stripCodeFences(_ text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.hasPrefix("```") {
+            if let firstNewline = result.firstIndex(of: "\n") {
+                result = String(result[result.index(after: firstNewline)...])
+            }
+        }
+        if result.hasSuffix("```") {
+            result = String(result.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
     }
 }
 

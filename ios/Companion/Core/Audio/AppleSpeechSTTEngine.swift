@@ -3,7 +3,7 @@ import Speech
 
 @MainActor
 final class AppleSpeechSTTEngine: NSObject, STTEngine {
-    let isAvailable: Bool = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))?.isAvailable ?? false
+    let isAvailable: Bool = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))?.supportsOnDeviceRecognition ?? false
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var recognitionTask: SFSpeechRecognitionTask?
 
@@ -11,6 +11,7 @@ final class AppleSpeechSTTEngine: NSObject, STTEngine {
         cancel()
         let request = SFSpeechURLRecognitionRequest(url: writeTmpFile(data: audioData))
         request.shouldReportPartialResults = false
+        request.requiresOnDeviceRecognition = true
         return try await withCheckedThrowingContinuation { [weak self] cont in
             guard let self, let speechRecognizer else {
                 cont.resume(throwing: STTError.unavailable)

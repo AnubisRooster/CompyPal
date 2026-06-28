@@ -131,10 +131,19 @@ final class MemoryStore: @unchecked Sendable {
         }
     }
 
-    func deduplicateMemory(content: String) async throws -> Bool {
+    func deduplicateMemory(content: String, companionId: Int64) async throws -> Bool {
         let queue = try await db.open()
+        let normalized = content
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         return try await queue.read { db in
-            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM memory WHERE content = ?", arguments: [content]) ?? 0
+            let count = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM memory
+                WHERE companion_id = ? AND LOWER(TRIM(content)) = ?
+            """, arguments: [companionId, normalized]) ?? 0
             return count > 0
         }
     }
@@ -154,6 +163,13 @@ final class MemoryStore: @unchecked Sendable {
     }
 
     // MARK: - Relationship
+
+    func liveTurnCount(companionId: Int64) async throws -> Int {
+        let queue = try await db.open()
+        return try await queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT turn_count FROM companion WHERE id = ?", arguments: [companionId]) ?? 0
+        }
+    }
 
     func relationshipStage(companionId: Int64) async throws -> String {
         let queue = try await db.open()

@@ -2,8 +2,6 @@ import Foundation
 import UIKit
 
 actor ImageGenerationService {
-    static let isEnabled = false
-
     private let client: OpenRouterClient
     private let cache = FileCache()
 
@@ -11,9 +9,13 @@ actor ImageGenerationService {
         self.client = client
     }
 
-    func generateForCompanion(companionId: Int64, prompt: String, catalog: [CatalogEntry]) async throws -> URL? {
+    func generateForCompanion(companionId: Int64, prompt: String, catalog: [CatalogEntry], referenceURL: URL? = nil) async throws -> URL? {
         guard let model = SelectionPolicy(role: .image, catalog: catalog, pinnedModelId: nil).best() else { return nil }
-        let imageData = try await client.generateImage(model: model.id, prompt: prompt)
+        var references: [URL] = []
+        if let refURL = referenceURL {
+            references = [refURL]
+        }
+        let imageData = try await client.generateImage(model: model.id, prompt: prompt, inputReferences: references)
 
         let key = "companion_\(companionId)_reference"
         try await cache.write(data: imageData, key: key)

@@ -22,6 +22,7 @@ actor OpenRouterClient {
         return AsyncThrowingStream { continuation in
             Task {
                 do {
+                    guard !key.isEmpty else { continuation.finish(throwing: ClientError.noKey); return }
                     let body = ChatRequest(model: model, messages: messages, stream: true, maxTokens: maxTokens)
                     var req = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
                     req.httpMethod = "POST"
@@ -40,20 +41,16 @@ actor OpenRouterClient {
                         return
                     }
 
-                    try await withRetry(maxAttempts: 3, delay: 1.0) {
-                        var lastYield: Date?
-                        for try await line in bytes.lines {
-                            try Task.checkCancellation()
-                            guard line.hasPrefix("data: ") else { continue }
-                            let json = String(line.dropFirst(6))
-                            if json == "[DONE]" { return }
-                            guard let data = json.data(using: .utf8),
-                                  let chunk = try? decoder.decode(ChatChunk.self, from: data),
-                                  let delta = chunk.choices?.first?.delta.content
-                            else { continue }
-                            continuation.yield(delta)
-                            lastYield = Date()
-                        }
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        guard line.hasPrefix("data: ") else { continue }
+                        let json = String(line.dropFirst(6))
+                        if json == "[DONE]" { break }
+                        guard let data = json.data(using: .utf8),
+                              let chunk = try? decoder.decode(ChatChunk.self, from: data),
+                              let delta = chunk.choices?.first?.delta.content
+                        else { continue }
+                        continuation.yield(delta)
                     }
                     continuation.finish()
                 } catch is CancellationError {
@@ -65,23 +62,10 @@ actor OpenRouterClient {
         }
     }
 
-    private func withRetry(maxAttempts: Int, delay: TimeInterval, operation: () async throws -> Void) async rethrows {
-        var attempts = 0
-        repeat {
-            attempts += 1
-            do {
-                try await operation()
-                return
-            } catch {
-                guard attempts < maxAttempts, !(error is CancellationError) else { throw error }
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            }
-        } while true
-    }
-
     func completeChat(model: String, messages: [Message]) async throws -> String {
         let key = apiKey
-        var body = ChatRequest(model: model, messages: messages, stream: false, maxTokens: 1024)
+        guard !key.isEmpty else { throw ClientError.noKey }
+        let body = ChatRequest(model: model, messages: messages, stream: false, maxTokens: 1024)
         var req = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -92,21 +76,28 @@ actor OpenRouterClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw ClientError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        let decoded = try decoder.decode(ChatChunk.self, from: data)
-        return decoded.choices?.first?.delta.content ?? ""
+        let decoded = try decoder.decode(ChatResponse.self, from: data)
+        return decoded.choices?.first?.message.content ?? ""
     }
 
-    func testConnection(model: String = "openai/gpt-4o-mini") async throws -> String {
+    func testConnection(model: String) async throws -> String {
         guard !apiKey.isEmpty else { throw ClientError.noKey }
         let messages = [Message(role: "user", content: "Respond with only the word: OK")]
         let resp = try await completeChat(model: model, messages: messages)
         return resp
     }
 
-    func generateImage(model: String, prompt: String) async throws -> Data {
+    func generateImage(model: String, prompt: String, inputReferences: [URL] = []) async throws -> Data {
         let key = apiKey
-        let body = ImageRequest(model: model, prompt: prompt, n: 1, size: "1024x1024")
-        var req = URLRequest(url: URL(string: "\(baseURL)/images/generations")!)
+        guard !key.isEmpty else { throw ClientError.noKey }
+        let body = ImageRequestInputReferences(
+            model: model,
+            prompt: prompt,
+            n: 1,
+            size: "1024x1024",
+            inputReferences: inputReferences.map { ["url": $0.absoluteString] }
+        )
+        var req = URLRequest(url: URL(string: "\(baseURL)/images")!)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -133,4 +124,17 @@ enum ClientError: Error {
     case noKey
     case invalidResponse
     case httpError(Int)
+}
+
+private struct ImageRequestInputReferences: Codable {
+    let model: String
+    let prompt: String
+    let n: Int?
+    let size: String?
+    let inputReferences: [[String: String]]?
+
+    enum CodingKeys: String, CodingKey {
+        case model, prompt, n, size
+        case inputReferences = "input_references"
+    }
 }
