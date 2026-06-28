@@ -8,14 +8,29 @@ actor OpenRouterClient {
     private var apiKey: String = ""
 
     init() {
-        let config = URLSessionConfiguration.default
+        let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 300
+        config.httpMaximumConnectionsPerHost = 5
+        config.httpShouldUsePipelining = true
+        config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
         self.decoder = JSONDecoder()
     }
 
     func setKey(_ key: String) { apiKey = key }
+
+    func prewarm() async {
+        guard !apiKey.isEmpty else { return }
+        let url = URL(string: "\(baseURL)/models")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 5
+        guard let (_, response) = try? await session.data(for: req),
+              let http = response as? HTTPURLResponse, http.statusCode == 200
+        else { return }
+    }
 
     func streamChat(model: String, messages: [Message], maxTokens: Int = 1024) -> AsyncThrowingStream<String, Error> {
         let key = apiKey

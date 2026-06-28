@@ -66,6 +66,7 @@ class ChatViewModel: ObservableObject {
         if let glbAsset = companion.glbAsset {
             await avatarViewModel.loadGLB(named: glbAsset)
         }
+        Task { await client.prewarm() }
     }
 
     func sendText(_ text: String) async {
@@ -84,15 +85,19 @@ class ChatViewModel: ObservableObject {
         errorMessage = nil
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         messages.append(ChatMessage(role: "user", text: trimmed))
-        let turnId = (try? await store.insertTurn(companionId: companion.id, role: "user", text: trimmed)) ?? 0
 
         isStreaming = true
         avatarViewModel.setThinking(true)
+
+        // Run independent DB operations concurrently before the streaming task
+        async let turnIdTask = (try? store.insertTurn(companionId: companion.id, role: "user", text: trimmed)) ?? 0
+        async let stageTask = (try? store.relationshipStage(companionId: companion.id)) ?? "acquaintance"
+        async let memoriesTask = (try? store.salientMemories(userId: userId, companionId: companion.id)) ?? []
+        let (turnId, stage, memories) = await (turnIdTask, stageTask, memoriesTask)
+
         messages.append(ChatMessage(role: "assistant", text: ""))
         let msgIndex = messages.count - 1
 
-        let stage = (try? await store.relationshipStage(companionId: companion.id)) ?? "acquaintance"
-        let memories = (try? await store.salientMemories(userId: userId, companionId: companion.id)) ?? []
         let systemPrompt = PersonaAssembler.systemPrompt(
             companionName: companion.name,
             traits: companion.traits,

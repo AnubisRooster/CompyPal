@@ -10,7 +10,11 @@ actor DatabaseManager {
         if let queue = dbQueue { return queue }
         let dir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let dbURL = dir.appendingPathComponent("companion.sqlite")
-        let queue = try DatabaseQueue(path: dbURL.path)
+        var config = Configuration()
+        config.prepareDatabase { db in
+            try db.execute(sql: "PRAGMA journal_mode=WAL")
+        }
+        let queue = try DatabaseQueue(path: dbURL.path, configuration: config)
         try runMigrations(queue)
         dbQueue = queue
         return queue
