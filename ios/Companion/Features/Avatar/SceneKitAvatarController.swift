@@ -36,6 +36,7 @@ final class SceneKitAvatarController: AvatarController {
     private var isIdleEnabled = true
     private var appearanceColorMap: [String: UIColor] = [:]
     private var morpherIndex: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
+    var morpherIndexCount: Int { morpherIndex.count }
 
     init() {
         scene = SCNScene()
@@ -73,7 +74,9 @@ final class SceneKitAvatarController: AvatarController {
         if hasGLB, let root = glbRootNode {
             var applied = false
             root.enumerateChildNodes { node, stop in
-                guard let name = node.name?.lowercased(), name.contains("face") else { return }
+                guard let name = node.name?.lowercased() else { return }
+                let isFace = name.contains("face") || name.contains("head") || name.contains("skin")
+                guard isFace else { return }
                 guard let geo = node.geometry, geo.materials.contains(where: { $0.diffuse.contents is UIImage }) else { return }
                 geo.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
                 applied = true
@@ -377,62 +380,122 @@ final class SceneKitAvatarController: AvatarController {
     }
 
     /// GLTFKit2 may strip morph target names from glTF assets.
-    /// Fall back to parsing the GLB JSON chunk to recover extras.targetNames.
+    /// Fall back to parsing the GLB JSON chunk to recover names from any of the
+    /// three locations the glTF 2.0 spec permits.
     private func recoverMorphTargetNames(from glbURL: URL) {
-        guard morpherIndex.keys.contains(where: { $0.hasPrefix("target_") }) else { return }
-        guard let data = try? Data(contentsOf: glbURL) else { return }
-        // GLB header: magic(4) + version(4) + length(4) = 12 bytes
+        guard morpherIndex.keys.contains(where: { $0.hasPrefix("target_") }) else {
+            avatarLog.info("Morph target names already present, no recovery needed")
+            return
+        }
+        guard let data = try? Data(contentsOf: glbURL) else {
+            avatarLog.error("Could not read GLB for name recovery")
+            return
+        }
+
+        // GLB layout: magic(4) + version(4) + length(4) = 12 bytes header
         // Then chunks: chunkLength(4) + chunkType(4) + chunkData(chunkLength)
         var offset = 12
-        let totalLength = data.count
-        var jsonString: String?
-        while offset + 8 <= totalLength {
+        var jsonData: Data?
+        while offset + 8 <= data.count {
             let chunkLength = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }
             let chunkType = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self) }
             offset += 8
             if chunkType == 0x4E4F534A {
-                let chunkData = data[offset..<offset + Int(chunkLength)]
-                jsonString = String(data: chunkData, encoding: .utf8)
+                jsonData = data.subdata(in: offset..<offset + Int(chunkLength))
                 break
             }
             offset += Int(chunkLength)
         }
-        guard let json = jsonString, let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return }
-        guard let meshes = obj["meshes"] as? [[String: Any]] else { return }
+        guard let jsonData,
+              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let meshes = json["meshes"] as? [[String: Any]]
+        else {
+            avatarLog.error("Could not parse GLB JSON chunk for name recovery")
+            return
+        }
 
-        // Build a mapping from generic target_N names to real names
-        var nameMap: [String: String] = [:]
+        // Collect target names from each mesh, checking all three spec-permitted locations:
+        //   1) meshes[i].extras.targetNames                  (most common — Blender, VRoidStudio, three.js)
+        //   2) meshes[i].primitives[j].extras.targetNames    (some older exporters)
+        //   3) meshes[i].primitives[j].targets[k].extras.targetNames  (rare)
+        var meshNamesList: [[String]] = []
         for mesh in meshes {
-            guard let primitives = mesh["primitives"] as? [[String: Any]] else { continue }
-            for primitive in primitives {
-                guard let targets = primitive["targets"] as? [[String: Any]] else { continue }
-                for (i, target) in targets.enumerated() {
-                    guard let extras = target["extras"] as? [String: Any],
-                          let names = extras["targetNames"] as? [String],
-                          i < names.count else { continue }
-                    nameMap["target_\(i)"] = names[i]
+            var names: [String] = []
+            if let extras = mesh["extras"] as? [String: Any],
+               let mn = extras["targetNames"] as? [String] {
+                names = mn
+            }
+            if names.isEmpty, let primitives = mesh["primitives"] as? [[String: Any]] {
+                for primitive in primitives {
+                    if let extras = primitive["extras"] as? [String: Any],
+                       let pn = extras["targetNames"] as? [String] {
+                        names = pn
+                        break
+                    }
+                    if let targets = primitive["targets"] as? [[String: Any]] {
+                        var perTarget: [String] = []
+                        for target in targets {
+                            if let extras = target["extras"] as? [String: Any],
+                               let tn = extras["targetNames"] as? [String],
+                               let first = tn.first {
+                                perTarget.append(first)
+                            }
+                        }
+                        if !perTarget.isEmpty { names = perTarget; break }
+                    }
                 }
             }
+            meshNamesList.append(names)
         }
-        guard !nameMap.isEmpty else { return }
 
-        // Rebuild index with real names
+        // Walk SceneKit morphers in DFS order — same order as buildMorpherIndex.
+        // Pair each morpher with the next mesh in JSON order that has morph names.
+        guard let root = glbRootNode else { return }
+        var morpherList: [SCNMorpher] = []
+        root.enumerateChildNodes { node, _ in
+            if let morpher = node.morpher { morpherList.append(morpher) }
+        }
+
+        var meshIdx = 0
         var rebuilt: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
-        for (key, entry) in morpherIndex {
-            if let realName = nameMap[key] {
-                rebuilt[realName] = entry
-                rebuilt[key] = entry
-                if let altName = rigMapping?.visemes.first(where: { $0.value == key })?.key {
-                    rebuilt[altName] = entry
+        var recoveredCount = 0
+        for morpher in morpherList {
+            while meshIdx < meshNamesList.count, meshNamesList[meshIdx].isEmpty {
+                meshIdx += 1
+            }
+            guard meshIdx < meshNamesList.count else { break }
+            let names = meshNamesList[meshIdx]
+            meshIdx += 1
+
+            for (i, target) in morpher.targets.enumerated() {
+                guard i < names.count else { break }
+                let realName = names[i]
+                rebuilt[realName] = (morpher, i)
+                recoveredCount += 1
+
+                if let mapping = rigMapping {
+                    for (vocab, mapped) in mapping.visemes where mapped == realName {
+                        rebuilt[vocab] = (morpher, i)
+                    }
+                    if mapping.blink.left == realName { rebuilt["blink_left"] = (morpher, i) }
+                    if mapping.blink.right == realName { rebuilt["blink_right"] = (morpher, i) }
                 }
-                if let altName = rigMapping?.visemes.first(where: { $0.value == realName })?.key {
-                    rebuilt[altName] = entry
+
+                if let existingName = target.name, existingName != realName {
+                    rebuilt[existingName] = (morpher, i)
                 }
-            } else {
-                rebuilt[key] = entry
             }
         }
-        morpherIndex = rebuilt
+
+        if recoveredCount > 0 {
+            for (key, entry) in morpherIndex where !key.hasPrefix("target_") {
+                if rebuilt[key] == nil { rebuilt[key] = entry }
+            }
+            morpherIndex = rebuilt
+            avatarLog.info("Recovered \(recoveredCount) morph target names from GLB JSON; index size: \(self.morpherIndex.count)")
+        } else {
+            avatarLog.warning("No morph target names found in GLB JSON at any of the three spec-permitted locations")
+        }
     }
 
     // MARK: - Procedural animation

@@ -4,9 +4,7 @@ import AVFoundation
 @MainActor
 class TTSEngine: NSObject {
     private let synthesizer = AVSpeechSynthesizer()
-    private let writeSynthesizer = AVSpeechSynthesizer()
-    private var rangeCallback: ((NSRange, [Float]) -> Void)?
-    private var pcmEnergies: [Float] = []
+    private var rangeCallback: ((NSRange) -> Void)?
     private var completion: (() -> Void)?
 
     @Published private(set) var isSpeaking = false
@@ -16,33 +14,48 @@ class TTSEngine: NSObject {
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String, voiceId: String = "com.apple.voice.compact.en-US.Samantha", pitch: Double = 1.0, rate: Double = 0.5, rangeCallback: ((NSRange, [Float]) -> Void)? = nil, completion: (() -> Void)? = nil) {
+    func speak(_ text: String, voiceId: String = "com.apple.voice.compact.en-US.Samantha", pitch: Double = 1.0, rate: Double = 0.5, rangeCallback: ((NSRange) -> Void)? = nil, energiesCallback: (([Float], TimeInterval) -> Void)? = nil, completion: (() -> Void)? = nil) {
         stop()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        self.rangeCallback = rangeCallback
+        self.completion = completion
 
-        // Pre-compute PCM energy from a write-synthesized buffer
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId) ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.pitchMultiplier = Float(pitch)
         utterance.rate = Float(rate)
-
-        if let buffer = synthesizeToBuffer(utterance) {
-            pcmEnergies = Self.computePCMEnergies(buffer)
-        } else {
-            pcmEnergies = []
-        }
-
-        self.rangeCallback = rangeCallback
-        self.completion = completion
-
-        let playUtterance = AVSpeechUtterance(string: text)
-        playUtterance.voice = utterance.voice
-        playUtterance.pitchMultiplier = Float(pitch)
-        playUtterance.rate = Float(rate)
-        playUtterance.volume = 1.0
+        utterance.volume = 1.0
 
         isSpeaking = true
-        synthesizer.speak(playUtterance)
+        synthesizer.speak(utterance)
+
+        // Synthesize PCM energies in the background — they arrive asynchronously
+        let voiceCopy = utterance.voice
+        let pitchCopy = utterance.pitchMultiplier
+        let rateCopy = utterance.rate
+        let textCopy = text
+        let capturedCallback = energiesCallback
+        Task.detached(priority: .userInitiated) {
+            let writeUtterance = AVSpeechUtterance(string: textCopy)
+            writeUtterance.voice = voiceCopy
+            writeUtterance.pitchMultiplier = pitchCopy
+            writeUtterance.rate = rateCopy
+
+            let synth = AVSpeechSynthesizer()
+            var buffers: [AVAudioPCMBuffer] = []
+            synth.write(writeUtterance) { buffer in
+                if let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 {
+                    buffers.append(pcm)
+                }
+            }
+            guard !buffers.isEmpty else { return }
+            let concatenated = Self.concatenateBuffers(buffers)
+            let energies = Self.computePCMEnergies(concatenated)
+            let duration = TimeInterval(concatenated.frameLength) / concatenated.format.sampleRate
+            await MainActor.run {
+                capturedCallback?(energies, duration)
+            }
+        }
     }
 
     func stop() {
@@ -51,19 +64,28 @@ class TTSEngine: NSObject {
         completion = nil
     }
 
-    private func synthesizeToBuffer(_ utterance: AVSpeechUtterance) -> AVAudioPCMBuffer? {
-        var buffers: [AVAudioPCMBuffer] = []
-        writeSynthesizer.write(utterance) { buffer in
-            if let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 {
-                buffers.append(pcm)
-            }
-        }
-        guard !buffers.isEmpty else { return nil }
+    var isPaused: Bool {
+        synthesizer.isPaused
+    }
+
+    func pause() {
+        synthesizer.pauseSpeaking(at: .word)
+    }
+
+    func resume() {
+        synthesizer.continueSpeaking()
+    }
+
+    // MARK: - Buffer processing (safe to call off main)
+
+    nonisolated static func concatenateBuffers(_ buffers: [AVAudioPCMBuffer]) -> AVAudioPCMBuffer {
+        if buffers.isEmpty { fatalError("empty buffer list") }
         if buffers.count == 1 { return buffers[0] }
-        // Concatenate multiple buffers
         let totalFrames = buffers.reduce(0) { $0 + Int($1.frameLength) }
         let format = buffers[0].format
-        guard let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalFrames)) else { return nil }
+        guard format.commonFormat == .pcmFormatFloat32,
+              let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalFrames))
+        else { return buffers[0] }
         var offset = 0
         for buf in buffers {
             let frames = Int(buf.frameLength)
@@ -77,7 +99,7 @@ class TTSEngine: NSObject {
         return result
     }
 
-    private static func computePCMEnergies(_ buffer: AVAudioPCMBuffer) -> [Float] {
+    nonisolated static func computePCMEnergies(_ buffer: AVAudioPCMBuffer) -> [Float] {
         guard let channelData = buffer.floatChannelData else { return [] }
         let frameLength = Int(buffer.frameLength)
         let channel = 0
@@ -93,29 +115,16 @@ class TTSEngine: NSObject {
                 sum += sample
             }
             let avg = sum / Float(count)
-            let energy = min(avg * 5, 1.0)
-            energies.append(energy)
+            energies.append(min(avg * 5, 1.0))
             pos = end
         }
         return energies
-    }
-
-    var isPaused: Bool {
-        synthesizer.isPaused
-    }
-
-    func pause() {
-        synthesizer.pauseSpeaking(at: .word)
-    }
-
-    func resume() {
-        synthesizer.continueSpeaking()
     }
 }
 
 extension TTSEngine: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        rangeCallback?(characterRange, pcmEnergies)
+        rangeCallback?(characterRange)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {

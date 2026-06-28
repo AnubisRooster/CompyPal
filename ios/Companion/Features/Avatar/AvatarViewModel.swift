@@ -46,6 +46,12 @@ final class AvatarViewModel: ObservableObject {
     private var displayLink: CADisplayLink?
     private var lastTimestamp: CFTimeInterval = 0
 
+    // MARK: - PCM / lip sync state
+
+    private var pcmEnergies: [Float] = []
+    private var totalEstimatedDuration: TimeInterval = 0
+    private var speechStartTime: TimeInterval = 0
+
     // MARK: - Init
 
     init() {
@@ -108,34 +114,23 @@ final class AvatarViewModel: ObservableObject {
 
     // MARK: - Performance / Speech
 
-    private var pcmEnergies: [Float] = []
+    func setPCMEnergies(_ energies: [Float], duration: TimeInterval) {
+        pcmEnergies = energies
+        totalEstimatedDuration = duration
+    }
 
-    func beginSpeaking(text: String, track: PerformanceTrack?, pcmEnergies: [Float] = []) {
+    func beginSpeaking(text: String, track: PerformanceTrack?) {
         isSpeaking = true
         isThinking = false
         idleSystem.setEnabled(false)
         performanceDirector.beginPerformance(text: text, track: track)
         controller.setViseme(.sil, weight: 0)
-        self.pcmEnergies = pcmEnergies
+        speechStartTime = CACurrentMediaTime()
     }
 
     func updateSpeechRange(characterRange: NSRange, text: String) {
         performanceDirector.updateSpeechRange(characterRange: characterRange, text: text)
-        let energy = energyForRange(characterRange, text: text)
-        lipSyncSystem.enqueueEnergy(energy, timestamp: CACurrentMediaTime())
-    }
-
-    private func energyForRange(_ range: NSRange, text: String) -> Float {
-        if !pcmEnergies.isEmpty {
-            let progress = Double(range.location) / Double(max(text.count, 1))
-            let idx = min(Int(progress * Double(pcmEnergies.count)), pcmEnergies.count - 1)
-            return idx >= 0 ? pcmEnergies[idx] : 0
-        }
-        guard let swiftRange = Range(range, in: text) else { return 0 }
-        let snippet = text[swiftRange].lowercased()
-        let vowelCount = snippet.filter { "aeiou".contains($0) }.count
-        let total = max(snippet.count, 1)
-        return min(Float(vowelCount) / Float(total) * 1.5, 1.0)
+        // Energy is now sampled from the display link tick against the playback clock
     }
 
     func endSpeaking() {
@@ -143,6 +138,7 @@ final class AvatarViewModel: ObservableObject {
         performanceDirector.endPerformance()
         idleSystem.setEnabled(true)
         mouthOpen = 0
+        pcmEnergies = []
     }
 
     func setThinking(_ thinking: Bool) {
@@ -187,6 +183,17 @@ final class AvatarViewModel: ObservableObject {
         let dt = now - lastTimestamp
         lastTimestamp = now
         idleSystem.tick(dt)
+        tickLipSync()
+    }
+
+    private func tickLipSync() {
+        guard isSpeaking, !pcmEnergies.isEmpty, totalEstimatedDuration > 0 else { return }
+        let elapsed = CACurrentMediaTime() - speechStartTime
+        let sampleInterval = totalEstimatedDuration / TimeInterval(pcmEnergies.count)
+        let idx = Int(elapsed / sampleInterval)
+        guard idx >= 0, idx < pcmEnergies.count else { return }
+        let energy = pcmEnergies[idx]
+        lipSyncSystem.enqueueEnergy(energy, timestamp: CACurrentMediaTime())
     }
 
     // MARK: - Internal
