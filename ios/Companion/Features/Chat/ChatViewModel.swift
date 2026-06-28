@@ -5,6 +5,7 @@ import AVFoundation
 class ChatViewModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isStreaming = false
+    @Published var isReconnecting = false
     @Published var errorMessage: String?
     @Published var isSpeaking = false
     @Published var isListening = false
@@ -108,9 +109,12 @@ class ChatViewModel: ObservableObject {
 
         streamTask = Task {
             var fullReply = ""
+            var candidateIndex = 0
+            var retries = 0
+            let maxRetries = 2
 
-            for candidate in chatCandidates {
-                guard isStreaming else { break }
+            while candidateIndex < chatCandidates.count, isStreaming {
+                let candidate = chatCandidates[candidateIndex]
                 do {
                     let chatMessages = buildChatMessages(system: systemPrompt, history: messages, newUserText: trimmed)
                     var streamed = ""
@@ -119,16 +123,29 @@ class ChatViewModel: ObservableObject {
                         streamed += delta
                         fullReply += delta
                         messages[msgIndex].text = streamed
+                        retries = 0
                     }
                     break
                 } catch is CancellationError {
                     return
                 } catch {
-                    errorMessage = "\(candidate.id) failed: \(error.localizedDescription)"
-                    continue
+                    if !fullReply.isEmpty && retries < maxRetries {
+                        retries += 1
+                        isReconnecting = true
+                        messages[msgIndex].text = fullReply + "\n\n_Reconnecting..._"
+                        let delay = UInt64(min(1_000_000 * pow(2, Double(retries - 1)), 4_000_000)) * 1_000
+                        try? await Task.sleep(nanoseconds: delay)
+                        fullReply = ""
+                    } else {
+                        retries = 0
+                        isReconnecting = false
+                        errorMessage = "\(candidate.id) failed: \(error.localizedDescription)"
+                        candidateIndex += 1
+                    }
                 }
             }
 
+            isReconnecting = false
             isStreaming = false
             avatarViewModel.setThinking(false)
 
@@ -164,6 +181,7 @@ class ChatViewModel: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isStreaming = false
+        isReconnecting = false
     }
 
     func toggleVoiceInput() {
