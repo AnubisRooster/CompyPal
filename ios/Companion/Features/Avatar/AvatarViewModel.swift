@@ -54,14 +54,25 @@ final class AvatarViewModel: ObservableObject {
 
     // MARK: - Init
 
+    private var reduceMotionObserver: NSObjectProtocol?
+
     init() {
         controller = SceneKitAvatarController()
         startDisplayLink()
         emotionSystem.setEmotion(.neutral, intensity: 0, duration: 0)
+        reduceMotionObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.idleSystem.setEnabled(!UIAccessibility.isReduceMotionEnabled)
+        }
     }
 
     deinit {
         displayLink?.invalidate()
+        if let observer = reduceMotionObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Lifecycle

@@ -8,6 +8,8 @@ actor OpenRouterClient {
     private var apiKey: String = ""
 
     init() {
+        // Ephemeral: no persistent cookies, cache, or credentials on disk.
+        // Correct for BYOK — the key is the only credential and lives in Keychain.
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 300

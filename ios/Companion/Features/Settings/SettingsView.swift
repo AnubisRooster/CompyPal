@@ -126,8 +126,8 @@ struct SettingsView: View {
 
     private func saveKey() {
         let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("sk-or-"), trimmed.count > 10 else {
-            statusMessage = "Invalid key format. Should start with 'sk-or-'."
+        guard KeychainService.isValidKey(trimmed) else {
+            statusMessage = "Invalid key format. OpenRouter keys start with 'sk-or-' and are at least 20 characters."
             return
         }
         do {

@@ -136,9 +136,9 @@ class ChatViewModel: ObservableObject {
                     if !fullReply.isEmpty && retries < maxRetries {
                         retries += 1
                         isReconnecting = true
-                        messages[msgIndex].text = fullReply + "\n\n_Reconnecting..._"
-                        let delay = UInt64(min(1_000_000 * pow(2, Double(retries - 1)), 4_000_000)) * 1_000
-                        try? await Task.sleep(nanoseconds: delay)
+                        messages[msgIndex].text = fullReply
+                        let delaySeconds = min(pow(2.0, Double(retries - 1)), 4.0)
+                        try? await Task.sleep(for: .seconds(delaySeconds))
                         fullReply = ""
                     } else {
                         retries = 0

@@ -78,4 +78,12 @@ struct CompanionTests {
         let stripped = MemoryExtractor.stripCodeFences(plain)
         #expect(stripped == "{\"key\": \"value\"}")
     }
+
+    @Test func isValidKeyValidatesOpenRouterKey() {
+        #expect(KeychainService.isValidKey("sk-or-v1-abcdefghijklmnopqrstuv") == true)
+        #expect(KeychainService.isValidKey("sk-or-v1-abc") == false, "too short")
+        #expect(KeychainService.isValidKey("sk-ant-abc123") == false, "wrong prefix")
+        #expect(KeychainService.isValidKey("") == false)
+        #expect(KeychainService.isValidKey("  sk-or-v1-abcdefghijklmnopqrstuv  ") == true, "trims whitespace")
+    }
 }

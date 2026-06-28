@@ -19,9 +19,18 @@ struct CompanionApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     Task {
                         await catalogChecker.refreshIfStale()
+                        await warmConnectionOnForeground()
                     }
                 }
         }
+    }
+
+    private func warmConnectionOnForeground() async {
+        let keychain = KeychainService()
+        guard let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else { return }
+        let client = OpenRouterClient()
+        await client.setKey(key)
+        await client.prewarm()
     }
 
     private func seedCompanionsAtLaunch() async {
