@@ -16,6 +16,7 @@ final class AvatarViewModel: ObservableObject {
     @Published var referenceImageData: Data?
     @Published var stage: String = "acquaintance"
     @Published var debugState = AvatarDebugState()
+    @Published var errorMessage: String?
 
     // MARK: - Owned subsystems
 
@@ -73,12 +74,19 @@ final class AvatarViewModel: ObservableObject {
     // MARK: - Appearance
 
     func loadGLB(named glbName: String) async {
-        guard let glbURL = Bundle.main.url(forResource: glbName, withExtension: "glb") else { return }
+        guard let glbURL = Bundle.main.url(forResource: glbName, withExtension: "glb") else {
+            errorMessage = "GLB file \(glbName).glb not found in bundle"
+            return
+        }
         let descriptor = AvatarDescriptor(
             glbURL: glbURL,
             rigMappingURL: Bundle.main.url(forResource: "RigMapping", withExtension: "json")
         )
-        try? await controller.load(descriptor)
+        do {
+            try await controller.load(descriptor)
+        } catch {
+            errorMessage = "Failed to load GLB \(glbName): \(error.localizedDescription)"
+        }
     }
 
     func applyAppearance(_ attributes: [(String, String)]) {
@@ -119,12 +127,6 @@ final class AvatarViewModel: ObservableObject {
         performanceDirector.endPerformance()
         idleSystem.setEnabled(true)
         mouthOpen = 0
-    }
-
-    func onSpeechProgress(mouthOpen value: Float) {
-        mouthOpen = value
-        let viseme: Viseme = value > 0.1 ? (value > 0.5 ? .aa : .oh) : .sil
-        controller.setViseme(viseme, weight: min(value, 1.0))
     }
 
     func setThinking(_ thinking: Bool) {

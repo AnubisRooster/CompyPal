@@ -1,5 +1,10 @@
 import SceneKit
+import SceneKit.ModelIO
 import SwiftUI
+import ModelIO
+import OSLog
+
+private let avatarLog = Logger(subsystem: "ai.companion", category: "avatar")
 
 @MainActor
 final class SceneKitAvatarController: AvatarController {
@@ -37,7 +42,7 @@ final class SceneKitAvatarController: AvatarController {
         sceneView.scene = scene
         sceneView.backgroundColor = .clear
         sceneView.autoenablesDefaultLighting = true
-        sceneView.allowsCameraControl = true
+        sceneView.allowsCameraControl = false
 
         rootNode = SCNNode()
         scene.rootNode.addChildNode(rootNode)
@@ -53,9 +58,11 @@ final class SceneKitAvatarController: AvatarController {
                 rigMapping = try JSONDecoder().decode(RigMapping.self, from: mappingData)
                 try loadGLB(url: glbURL)
                 hasGLB = true
+                avatarLog.info("Loaded GLB from \(glbURL.lastPathComponent)")
                 return
             } catch {
                 hasGLB = false
+                avatarLog.error("GLB load failed: \(error.localizedDescription)")
             }
         }
         hasGLB = false
@@ -74,7 +81,9 @@ final class SceneKitAvatarController: AvatarController {
         let garmentURL = Bundle.main.url(forResource: garment.glbName, withExtension: "glb")
         guard let url = garmentURL else { throw AvatarError.garmentNotFound(garment.glbName) }
 
-        let scene = try SCNScene(url: url, options: nil)
+        let mdlAsset = MDLAsset(url: url)
+        mdlAsset.loadTextures()
+        let scene = SCNScene(mdlAsset: mdlAsset)
         guard let garmentNode = scene.rootNode.childNodes.first else {
             throw AvatarError.garmentLoadFailed
         }
@@ -256,12 +265,16 @@ final class SceneKitAvatarController: AvatarController {
     }
 
     private func loadGLB(url: URL) throws {
-        let glbScene = try SCNScene(url: url, options: nil)
-        guard let glbRoot = glbScene.rootNode.childNodes.first else { return }
+        let mdlAsset = MDLAsset(url: url)
+        mdlAsset.loadTextures()
+        let glbScene = SCNScene(mdlAsset: mdlAsset)
+        guard let glbRoot = glbScene.rootNode.childNodes.first else {
+            avatarLog.error("MDLAsset produced no root nodes from \(url.lastPathComponent)")
+            throw AvatarError.glbLoadFailed
+        }
         glbRootNode = glbRoot
         rootNode.addChildNode(glbRoot)
 
-        // Hide procedural nodes
         headNode?.isHidden = true
     }
 
@@ -307,12 +320,21 @@ final class SceneKitAvatarController: AvatarController {
     func setMorphWeight(named name: String, weight: Float) {
         let searchNodes = hasGLB ? [glbRootNode].compactMap { $0 } : [headNode].compactMap { $0 }
         for node in searchNodes {
-            guard let morpher = node.morpher ?? node.childNodes.first?.morpher else { continue }
-            for (i, target) in morpher.targets.enumerated() {
-                if target.name == name || target.name?.contains(name) == true {
-                    morpher.setWeight(CGFloat(weight), forTargetAt: i)
+            walkNodeTree(node) { n in
+                guard let morpher = n.morpher else { return }
+                for (i, target) in morpher.targets.enumerated() {
+                    if target.name == name || target.name?.contains(name) == true {
+                        morpher.setWeight(CGFloat(weight), forTargetAt: i)
+                    }
                 }
             }
+        }
+    }
+
+    private func walkNodeTree(_ node: SCNNode, visit: (SCNNode) -> Void) {
+        visit(node)
+        for child in node.childNodes {
+            walkNodeTree(child, visit: visit)
         }
     }
 
@@ -341,46 +363,34 @@ final class SceneKitAvatarController: AvatarController {
     }
 
     private func applyProceduralGesture(_ gesture: Gesture) {
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.3
+        guard let head = headNode else { return }
         switch gesture {
         case .nod:
-            headNode?.eulerAngles = SCNVector3(0.1, 0, 0)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.headNode?.eulerAngles = SCNVector3(-0.05, 0, 0)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.headNode?.eulerAngles = SCNVector3(0, 0, 0)
-                }
-            }
+            let up = SCNAction.rotateTo(x: 0.1, y: 0, z: 0, duration: 0.15)
+            let down = SCNAction.rotateTo(x: -0.05, y: 0, z: 0, duration: 0.15)
+            let neutral = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.15)
+            head.runAction(SCNAction.sequence([up, down, neutral]))
         case .shakeHead:
-            headNode?.eulerAngles = SCNVector3(0, 0.15, 0)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.headNode?.eulerAngles = SCNVector3(0, -0.1, 0)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.headNode?.eulerAngles = SCNVector3(0, 0, 0)
-                }
-            }
+            let right = SCNAction.rotateTo(x: 0, y: 0.15, z: 0, duration: 0.15)
+            let left = SCNAction.rotateTo(x: 0, y: -0.1, z: 0, duration: 0.15)
+            let neutral = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.15)
+            head.runAction(SCNAction.sequence([right, left, neutral]))
         case .tiltHead:
-            headNode?.eulerAngles = SCNVector3(0, 0, 0.15)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.headNode?.eulerAngles = SCNVector3(0, 0, 0)
-            }
+            head.runAction(SCNAction.sequence([
+                SCNAction.rotateTo(x: 0, y: 0, z: 0.15, duration: 0.2),
+                SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.3)
+            ]))
         case .leanIn:
-            headNode?.position = SCNVector3(0, 0, 0.15)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.headNode?.position = SCNVector3(0, 0, 0)
-            }
+            let forward = SCNAction.move(to: SCNVector3(0, 0, 0.15), duration: 0.2)
+            let back = SCNAction.move(to: SCNVector3(0, 0, 0), duration: 0.3)
+            head.runAction(SCNAction.sequence([forward, back]))
         case .laugh:
-            headNode?.eulerAngles = SCNVector3(0.05, 0, 0)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
-                self?.headNode?.eulerAngles = SCNVector3(-0.03, 0, 0)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                    self?.headNode?.eulerAngles = SCNVector3(0, 0, 0)
-                }
-            }
+            let up = SCNAction.rotateTo(x: 0.05, y: 0, z: 0, duration: 0.12)
+            let down = SCNAction.rotateTo(x: -0.03, y: 0, z: 0, duration: 0.12)
+            let neutral = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.25)
+            head.runAction(SCNAction.sequence([up, down, neutral]))
         default: break
         }
-        SCNTransaction.commit()
     }
 
     private func playAnimationClip(named name: String) {
@@ -412,7 +422,8 @@ final class SceneKitAvatarController: AvatarController {
     private var blinkPhase: Float = 0
     private var breathePhase: Float = 0
     private var swayPhase: Float = 0
-    private var microSaccadePhase: Float = 0
+    private var lastSaccadeTime: TimeInterval = 0
+    private var nextSaccadeInterval: TimeInterval = 2
 
     private func idleLifeTick(_ dt: TimeInterval) {
         let now = CACurrentMediaTime()
@@ -435,14 +446,15 @@ final class SceneKitAvatarController: AvatarController {
         headNode?.eulerAngles.z = sway
 
         // Micro-saccades
-        microSaccadePhase += Float(dt) * 8
-        if Int(microSaccadePhase) % 30 == 0 {
+        if now - lastSaccadeTime > nextSaccadeInterval {
             let saccadeX = Float.random(in: -0.005...0.005)
             let saccadeY = Float.random(in: -0.005...0.005)
             leftEyeNode?.position.x = -0.05 + saccadeX
             leftEyeNode?.position.y = 0.05 + saccadeY
             rightEyeNode?.position.x = 0.05 + saccadeX
             rightEyeNode?.position.y = 0.05 + saccadeY
+            lastSaccadeTime = now
+            nextSaccadeInterval = TimeInterval.random(in: 1...4)
         }
     }
 

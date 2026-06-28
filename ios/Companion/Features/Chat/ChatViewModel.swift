@@ -63,8 +63,8 @@ class ChatViewModel: ObservableObject {
         if let imgData = await imageGenService.cachedImageData(companionId: companion.id) {
             avatarViewModel.applyReferenceImage(imgData)
         }
-        if companion.name == "Riven" {
-            await avatarViewModel.loadGLB(named: "riven")
+        if let glbAsset = companion.appearance.first(where: { $0.0 == "glb_asset" })?.1 {
+            await avatarViewModel.loadGLB(named: glbAsset)
         }
     }
 
@@ -149,9 +149,22 @@ class ChatViewModel: ObservableObject {
             if hasAppearanceIntent(text: trimmed) {
                 await handleAppearanceIntent(userText: trimmed, catalog: catalog)
             }
-            avatarViewModel.beginSpeaking(text: fullReply, track: nil)
-            speakReply(fullReply)
+            let (cleanText, track) = Self.parsePerformanceReply(fullReply)
+            messages[msgIndex].text = cleanText
+            avatarViewModel.beginSpeaking(text: cleanText, track: track)
+            speakReply(cleanText)
         }
+    }
+
+    private static func parsePerformanceReply(_ reply: String) -> (String, PerformanceTrack?) {
+        guard let range = reply.range(of: "PERFORMANCE:"),
+              let start = reply[range.upperBound...].firstIndex(of: "{"),
+              let end = reply[range.upperBound...].balancedClose(from: start)
+        else { return (reply, nil) }
+        let jsonChunk = String(reply[start...end])
+        let cleanText = reply[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        let track = PerformanceTrackParser.parse(raw: jsonChunk)
+        return (cleanText, track)
     }
 
     func cancelStream() {
@@ -197,13 +210,14 @@ class ChatViewModel: ObservableObject {
 
         ttsEngine.speak(
             text,
-            voiceId: "com.apple.voice.compact.en-US.Samantha",
+            voiceId: companionVoiceId(),
             pitch: 1.0,
             rate: 0.5
-        ) { [weak self] mouthValue in
-            Task { @MainActor in
-                self?.avatarViewModel.onSpeechProgress(mouthOpen: mouthValue)
-            }
+        ) { [weak self] pcmBuffer, charOffset in
+            guard let self else { return }
+            self.avatarViewModel.lipSyncSystem.processAudioBuffer(pcmBuffer)
+            let nsRange = NSRange(location: charOffset, length: 0)
+            self.avatarViewModel.updateSpeechRange(characterRange: nsRange, text: text)
         }
         isSpeaking = true
 
@@ -214,6 +228,10 @@ class ChatViewModel: ObservableObject {
             isSpeaking = false
             avatarViewModel.endSpeaking()
         }
+    }
+
+    private func companionVoiceId() -> String {
+        MemoryStore.selectVoice()
     }
 
     func cachedImageData(companionId: Int64) async -> Data? {

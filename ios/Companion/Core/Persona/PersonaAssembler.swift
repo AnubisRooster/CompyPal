@@ -43,6 +43,10 @@ struct PersonaAssembler {
         \(memoryBlock)
 
         Stay in character. Be concise but warm. Never break character. Refer naturally to memories when relevant.
+
+        After your response, include a JSON performance block on its own line in this exact format:
+        PERFORMANCE:{"text":"<your reply>","emotion":"neutral|warm|happy|sad|surprised|concerned|playful|thoughtful|affectionate","beats":[{"at":<char_offset>,"emotion":"<emotion>","gesture":"<gesture>","gaze":"<gaze>"}]}
+        Use beats sparingly — at most 2-3 per response. The at field is the character offset in your reply where the beat fires.
         """
     }
 

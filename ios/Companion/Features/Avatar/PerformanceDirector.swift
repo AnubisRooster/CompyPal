@@ -64,9 +64,9 @@ final class PerformanceDirector {
     func updateSpeechRange(characterRange: NSRange, text: String) {
         guard isPerforming else { return }
 
-        // Fire beats at matching character offsets
+        // Fire all not-yet-fired beats whose offset has been reached
         let location = characterRange.location
-        let matching = pendingBeats.filter { $0.at >= location - 2 && $0.at <= location + 2 }
+        let matching = pendingBeats.filter { $0.at <= location }
         for beat in matching {
             if let emotion = beat.emotion {
                 emotionSystem.setEmotion(emotion, intensity: 1.0, duration: 0.2)
@@ -81,7 +81,7 @@ final class PerformanceDirector {
                 }
             }
         }
-        pendingBeats.removeAll { $0.at >= location - 2 && $0.at <= location + 2 }
+        pendingBeats.removeAll { $0.at <= location }
     }
 
     func endPerformance() {

@@ -116,9 +116,24 @@ struct PersonalityMotionProfile {
     static func from(traits: [(String, Double)], stage: String) -> PersonalityMotionProfile {
         let traitMap = Dictionary(uniqueKeysWithValues: traits.map { ($0.0, $0.1) })
 
-        let friendliness = traitMap["friendly"] ?? 0.5
-        let energy = traitMap["energetic"] ?? 0.5
-        let thoughtfulness = traitMap["thoughtful"] ?? 0.3
+        let synonymGroups: [(String, [String])] = [
+            ("friendly", ["friendly", "warm", "affectionate", "kind"]),
+            ("energetic", ["energetic", "curious", "playful", "witty"]),
+            ("thoughtful", ["thoughtful", "calm", "wise", "serious"]),
+        ]
+
+        func resolve(_ key: String, _ groups: [(String, [String])]) -> Double {
+            for (canonical, synonyms) in groups {
+                if canonical == key || synonyms.contains(key) {
+                    return traitMap[key] ?? traitMap[canonical] ?? 0.5
+                }
+            }
+            return traitMap[key] ?? 0.5
+        }
+
+        let friendliness = resolve("friendly", synonymGroups)
+        let energy = resolve("energetic", synonymGroups)
+        let thoughtfulness = resolve("thoughtful", synonymGroups)
 
         let isClose = stage == "friend" || stage == "confidant"
 
@@ -167,13 +182,11 @@ extension Emotion {
 
 struct PerformanceTrackParser {
     static func parse(raw: String) -> PerformanceTrack? {
-        let cleaned = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: .newlines)
-            .filter { !$0.hasPrefix("```") }
-            .joined()
-
-        guard let data = cleaned.data(using: .utf8),
+        guard let start = raw.firstIndex(of: "{"),
+              let end = raw[start...].balancedClose()
+        else { return nil }
+        let jsonChunk = raw[start...end]
+        guard let data = jsonChunk.data(using: .utf8),
               var track = try? JSONDecoder().decode(PerformanceTrack.self, from: data)
         else { return nil }
 
@@ -205,4 +218,21 @@ struct AvatarDebugState {
     var currentGaze: GazeTarget = .camera
     var isIdleEnabled = true
     var mouthOpen: Float = 0
+}
+
+extension StringProtocol {
+    func balancedClose(from start: Index? = nil) -> Index? {
+        let searchStart = start ?? self.startIndex
+        guard searchStart < endIndex, self[searchStart] == "{" else { return nil }
+        var depth = 0
+        var i = searchStart
+        while i < endIndex {
+            let ch = self[i]
+            if ch == "{" { depth += 1 }
+            else if ch == "}" { depth -= 1 }
+            if depth == 0 { return i }
+            formIndex(after: &i)
+        }
+        return nil
+    }
 }

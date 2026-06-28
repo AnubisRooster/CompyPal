@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import GRDB
 
 final class MemoryStore: @unchecked Sendable {
@@ -41,12 +42,13 @@ final class MemoryStore: @unchecked Sendable {
             userId: userId,
             name: "Riven",
             traits: [("curious", 0.9), ("playful", 0.8), ("energetic", 0.7), ("wise", 0.6)],
-            appearance: [("hair_color", "red"), ("hair_length", "long"), ("hair_style", "wavy"), ("eye_color", "green"), ("skin_tone", "light")]
+            appearance: [("hair_color", "red"), ("hair_length", "long"), ("hair_style", "wavy"), ("eye_color", "green"), ("skin_tone", "light"), ("glb_asset", "riven")]
         )
     }
 
     func createCompanion(userId: Int64, name: String, traits: [(String, Double)], appearance: [(String, String)]) async throws -> Int64 {
         let queue = try await db.open()
+        let voiceId = Self.selectVoice()
         return try await queue.write { db in
             try db.execute(sql: "INSERT INTO companion (user_id, name) VALUES (?, ?)", arguments: [userId, name])
             let companionId = db.lastInsertedRowID
@@ -56,9 +58,14 @@ final class MemoryStore: @unchecked Sendable {
             for (key, value) in appearance {
                 try db.execute(sql: "INSERT INTO appearance_attribute (companion_id, key, value) VALUES (?, ?, ?)", arguments: [companionId, key, value])
             }
-            try db.execute(sql: "INSERT INTO voice (companion_id, system_voice_id) VALUES (?, ?)", arguments: [companionId, "com.apple.voice.compact.en-US.Samantha"])
+            try db.execute(sql: "INSERT INTO voice (companion_id, system_voice_id) VALUES (?, ?)", arguments: [companionId, voiceId])
             return companionId
         }
+    }
+
+    static func selectVoice() -> String {
+        let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+        return voices.first?.identifier ?? "com.apple.voice.compact.en-US.Samantha"
     }
 
     func companions(userId: Int64) async throws -> [CompanionInfo] {

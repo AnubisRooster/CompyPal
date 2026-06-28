@@ -4,19 +4,26 @@ import AVFoundation
 @MainActor
 class TTSEngine: NSObject {
     private let synthesizer = AVSpeechSynthesizer()
-    private var onMouthOpen: ((Float) -> Void)?
+    private let audioEngine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+    private var pcmCallback: ((AVAudioPCMBuffer, Int) -> Void)?
+    private var speechText: String = ""
 
     @Published private(set) var isSpeaking = false
 
     override init() {
         super.init()
         synthesizer.delegate = self
+        audioEngine.attach(playerNode)
+        let mainMixer = audioEngine.mainMixerNode
+        audioEngine.connect(playerNode, to: mainMixer, format: nil)
     }
 
-    func speak(_ text: String, voiceId: String = "com.apple.voice.compact.en-US.Samantha", pitch: Double = 1.0, rate: Double = 0.5, onMouthOpen: ((Float) -> Void)? = nil) {
+    func speak(_ text: String, voiceId: String = "com.apple.voice.compact.en-US.Samantha", pitch: Double = 1.0, rate: Double = 0.5, pcmCallback: ((AVAudioPCMBuffer, Int) -> Void)? = nil) {
         stop()
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        self.onMouthOpen = onMouthOpen
+        self.pcmCallback = pcmCallback
+        speechText = text
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(identifier: voiceId) ?? AVSpeechSynthesisVoice(language: "en-US")
@@ -25,14 +32,49 @@ class TTSEngine: NSObject {
         utterance.volume = 1.0
 
         isSpeaking = true
-        synthesizer.speak(utterance)
+
+        Task.detached { [weak self] in
+            var buffers: [AVAudioPCMBuffer] = []
+
+            self?.synthesizer.write(utterance) { audioBuffer in
+                guard let pcm = audioBuffer as? AVAudioPCMBuffer,
+                      let pcmCopy = pcm.copy() as? AVAudioPCMBuffer
+                else { return }
+                buffers.append(pcmCopy)
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let totalBuffers = buffers.count
+                guard totalBuffers > 0 else {
+                    isSpeaking = false
+                    return
+                }
+
+                for (i, buf) in buffers.enumerated() {
+                    let charOffset = Int((Float(i) / Float(totalBuffers)) * Float(speechText.utf16.count))
+                    pcmCallback?(buf, charOffset)
+                }
+
+                do {
+                    try audioEngine.start()
+                    for buf in buffers {
+                        playerNode.scheduleBuffer(buf, at: nil, options: .interruptsAtLoop, completionHandler: nil)
+                    }
+                    playerNode.play()
+                } catch {
+                    isSpeaking = false
+                }
+            }
+        }
     }
 
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
+        playerNode.stop()
+        audioEngine.stop()
         isSpeaking = false
-        onMouthOpen?(0)
-        onMouthOpen = nil
+        pcmCallback = nil
     }
 
     var isPaused: Bool {
@@ -48,27 +90,12 @@ class TTSEngine: NSObject {
     }
 }
 
-extension TTSEngine: AVSpeechSynthesizerDelegate {
+extension TTSEngine: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         isSpeaking = false
-        onMouthOpen?(0)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         isSpeaking = false
-        onMouthOpen?(0)
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        let totalLen = utterance.speechString.utf16.count
-        guard totalLen > 0 else { return }
-        let progress = Float(characterRange.location) / Float(totalLen)
-        let mouthValue = sinusoidMouth(from: progress)
-        onMouthOpen?(mouthValue)
-    }
-
-    private func sinusoidMouth(from progress: Float) -> Float {
-        let phase = progress * Float.pi * 4
-        return abs(sin(phase)) * 0.6 + 0.1
     }
 }
