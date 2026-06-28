@@ -33,9 +33,13 @@ class ChatViewModel: ObservableObject {
     private var pendingTranscript = ""
     private var streamTask: Task<Void, Never>?
 
-    private let intentKeywords: Set<String> = [
-        "change", "make", "give", "try", "new", "look", "style", "hair", "color", "eye", "skin",
-        "appearance", "different", "cut", "dye", "wear", "shirt", "outfit", "dress"
+    private let intentPatterns: [Regex<AnyRegexOutput>] = [
+        try! Regex("change (my|the|this) (hair|eye|skin|look|style)"),
+        try! Regex("(dye|cut|color|style|change) my (hair|eyebrow)"),
+        try! Regex("give me (a|an) (new|different) (look|style|haircut)"),
+        try! Regex("try (on|out) a (new|different) (look|style|color)"),
+        try! Regex("(want|like|love) to (change|try|have) (my|a)"),
+        try! Regex("what (do|would) i (look like|wear|try)"),
     ]
 
     init(companion: CompanionInfo) {
@@ -210,7 +214,7 @@ class ChatViewModel: ObservableObject {
 
     private func hasAppearanceIntent(text: String) -> Bool {
         let lower = text.lowercased()
-        return intentKeywords.contains { lower.contains($0) }
+        return intentPatterns.contains { lower.contains($0) }
     }
 
     private func handleAppearanceIntent(userText: String, catalog: [CatalogEntry]) async {
@@ -237,9 +241,9 @@ class ChatViewModel: ObservableObject {
                 messages.append(genMsg)
 
                 let prompt = "Portrait of a person with \(delta.attribute) set to \(attribute), consistent with current appearance: \(companion.appearance.map { "\($0.0): \($0.1)" }.joined(separator: ", "))"
-                if let refURL = await imageGenService.cachedImageURL(companionId: companion.id),
-                   let _ = try? await imageGenService.generateForCompanion(
-                    companionId: companion.id, prompt: prompt, catalog: catalog, referenceURL: refURL
+                let existingData = await imageGenService.cachedImageData(companionId: companion.id)
+                if let _ = try? await imageGenService.generateForCompanion(
+                    companionId: companion.id, prompt: prompt, catalog: catalog, referenceData: existingData
                 ) {
                     referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
                     let doneMsg = ChatMessage(role: "assistant", text: "Reference image generated and applied to your companion.")

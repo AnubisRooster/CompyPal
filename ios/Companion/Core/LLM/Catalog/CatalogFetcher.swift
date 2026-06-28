@@ -14,13 +14,19 @@ actor CatalogFetcher {
     }
 
     func fetch(apiKey: String) async throws -> [CatalogEntry] {
-        var req = URLRequest(url: URL(string: "\(baseURL)/models")!)
+        async let chatModels = fetchModels(apiKey: apiKey, path: "\(baseURL)/models")
+        async let imageModels = fetchModels(apiKey: apiKey, path: "\(baseURL)/images/models")
+        return try await chatModels + imageModels
+    }
+
+    private func fetchModels(apiKey: String, path: String) async throws -> [CatalogEntry] {
+        var req = URLRequest(url: URL(string: path)!)
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-            throw CatalogError.fetchFailed
+            return []
         }
         let decoded = try decoder.decode(CatalogResponse.self, from: data)
         return decoded.data

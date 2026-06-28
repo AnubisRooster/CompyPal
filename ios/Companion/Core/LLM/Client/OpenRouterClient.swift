@@ -87,7 +87,7 @@ actor OpenRouterClient {
         return resp
     }
 
-    func generateImage(model: String, prompt: String, inputReferences: [URL] = []) async throws -> Data {
+    func generateImage(model: String, prompt: String, inputReferenceDataURLs: [String] = []) async throws -> Data {
         let key = apiKey
         guard !key.isEmpty else { throw ClientError.noKey }
         let body = ImageRequestInputReferences(
@@ -95,7 +95,7 @@ actor OpenRouterClient {
             prompt: prompt,
             n: 1,
             size: "1024x1024",
-            inputReferences: inputReferences.map { ["url": $0.absoluteString] }
+            inputReferences: inputReferenceDataURLs.isEmpty ? nil : inputReferenceDataURLs.map { ["url": $0] }
         )
         var req = URLRequest(url: URL(string: "\(baseURL)/images")!)
         req.httpMethod = "POST"

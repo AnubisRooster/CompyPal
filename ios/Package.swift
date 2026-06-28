@@ -6,16 +6,15 @@ let package = Package(
     platforms: [
         .iOS(.v17)
     ],
-    products: [
-        .library(
-            name: "Companion",
-            targets: ["Companion"]
-        ),
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift", from: "6.29.0"),
     ],
     targets: [
         .target(
             name: "Companion",
-            dependencies: [],
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             path: "Companion"
         ),
         .testTarget(

@@ -9,13 +9,13 @@ actor ImageGenerationService {
         self.client = client
     }
 
-    func generateForCompanion(companionId: Int64, prompt: String, catalog: [CatalogEntry], referenceURL: URL? = nil) async throws -> URL? {
+    func generateForCompanion(companionId: Int64, prompt: String, catalog: [CatalogEntry], referenceData: Data? = nil) async throws -> URL? {
         guard let model = SelectionPolicy(role: .image, catalog: catalog, pinnedModelId: nil).best() else { return nil }
-        var references: [URL] = []
-        if let refURL = referenceURL {
-            references = [refURL]
+        var referenceDataURLs: [String] = []
+        if let data = referenceData {
+            referenceDataURLs = [Self.base64DataURL(data, mimeType: "image/png")]
         }
-        let imageData = try await client.generateImage(model: model.id, prompt: prompt, inputReferences: references)
+        let imageData = try await client.generateImage(model: model.id, prompt: prompt, inputReferenceDataURLs: referenceDataURLs)
 
         let key = "companion_\(companionId)_reference"
         try await cache.write(data: imageData, key: key)
@@ -24,14 +24,17 @@ actor ImageGenerationService {
         return url
     }
 
-    func cachedImageURL(companionId: Int64) async -> URL? {
-        let key = "companion_\(companionId)_reference"
-        guard await cache.exists(key: key) else { return nil }
-        return await cache.url(for: key)
-    }
-
     func cachedImageData(companionId: Int64) async -> Data? {
         let key = "companion_\(companionId)_reference"
         return await cache.read(key: key)
+    }
+
+    func hasCachedImage(companionId: Int64) async -> Bool {
+        let key = "companion_\(companionId)_reference"
+        return await cache.exists(key: key)
+    }
+
+    static func base64DataURL(_ data: Data, mimeType: String) -> String {
+        "data:\(mimeType);base64,\(data.base64EncodedString())"
     }
 }
