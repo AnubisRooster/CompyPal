@@ -1,5 +1,4 @@
 import Foundation
-import AVFoundation
 import GRDB
 
 final class MemoryStore: @unchecked Sendable {
@@ -35,22 +34,25 @@ final class MemoryStore: @unchecked Sendable {
             userId: userId,
             name: "Atlas",
             traits: [("friendly", 0.85), ("thoughtful", 0.75), ("calm", 0.7), ("witty", 0.6)],
-            appearance: [("hair_color", "brown"), ("hair_length", "short"), ("hair_style", "straight"), ("eye_color", "blue"), ("skin_tone", "medium")]
+            appearance: [("hair_color", "brown"), ("hair_length", "short"), ("hair_style", "straight"), ("eye_color", "blue"), ("skin_tone", "medium")],
+            voiceId: VoicePicker.selectVoice(gender: .male)
         )
 
         try await createCompanion(
             userId: userId,
             name: "Riven",
             traits: [("curious", 0.9), ("playful", 0.8), ("energetic", 0.7), ("wise", 0.6)],
-            appearance: [("hair_color", "red"), ("hair_length", "long"), ("hair_style", "wavy"), ("eye_color", "green"), ("skin_tone", "light"), ("glb_asset", "riven")]
+            appearance: [("hair_color", "red"), ("hair_length", "long"), ("hair_style", "wavy"), ("eye_color", "green"), ("skin_tone", "light")],
+            glbAsset: "riven",
+            voiceId: VoicePicker.selectVoice(gender: .female)
         )
     }
 
-    func createCompanion(userId: Int64, name: String, traits: [(String, Double)], appearance: [(String, String)]) async throws -> Int64 {
+    func createCompanion(userId: Int64, name: String, traits: [(String, Double)], appearance: [(String, String)], glbAsset: String? = nil, voiceId: String? = nil) async throws -> Int64 {
         let queue = try await db.open()
-        let voiceId = Self.selectVoice()
+        let resolvedVoice = voiceId ?? VoicePicker.selectVoice()
         return try await queue.write { db in
-            try db.execute(sql: "INSERT INTO companion (user_id, name) VALUES (?, ?)", arguments: [userId, name])
+            try db.execute(sql: "INSERT INTO companion (user_id, name, glb_asset) VALUES (?, ?, ?)", arguments: [userId, name, glbAsset])
             let companionId = db.lastInsertedRowID
             for (traitName, intensity) in traits {
                 try db.execute(sql: "INSERT INTO personality_trait (companion_id, name, intensity) VALUES (?, ?, ?)", arguments: [companionId, traitName, intensity])
@@ -58,14 +60,16 @@ final class MemoryStore: @unchecked Sendable {
             for (key, value) in appearance {
                 try db.execute(sql: "INSERT INTO appearance_attribute (companion_id, key, value) VALUES (?, ?, ?)", arguments: [companionId, key, value])
             }
-            try db.execute(sql: "INSERT INTO voice (companion_id, system_voice_id) VALUES (?, ?)", arguments: [companionId, voiceId])
+            try db.execute(sql: "INSERT INTO voice (companion_id, system_voice_id) VALUES (?, ?)", arguments: [companionId, resolvedVoice])
             return companionId
         }
     }
 
-    static func selectVoice() -> String {
-        let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
-        return voices.first?.identifier ?? "com.apple.voice.compact.en-US.Samantha"
+    func voiceId(companionId: Int64) async throws -> String? {
+        let queue = try await db.open()
+        return try await queue.read { db in
+            try String.fetchOne(db, sql: "SELECT system_voice_id FROM voice WHERE companion_id = ?", arguments: [companionId])
+        }
     }
 
     func companions(userId: Int64) async throws -> [CompanionInfo] {
@@ -80,14 +84,17 @@ final class MemoryStore: @unchecked Sendable {
                 let id: Int64 = row["id"]
                 let traits = try personalityTraits(companionId: id, db: db)
                 let appearance = try appearanceAttributes(companionId: id, db: db)
+                let voiceId = try String.fetchOne(db, sql: "SELECT system_voice_id FROM voice WHERE companion_id = ?", arguments: [id])
                 return CompanionInfo(
                     id: id,
                     name: row["name"],
                     relationshipStage: row["relationship_stage"],
                     turnCount: row["turn_count"],
+                    glbAsset: row["glb_asset"],
                     createdAt: row["created_at"],
                     traits: traits,
-                    appearance: appearance
+                    appearance: appearance,
+                    voiceId: voiceId
                 )
             }
         }
@@ -99,14 +106,17 @@ final class MemoryStore: @unchecked Sendable {
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM companion WHERE id = ?", arguments: [id]) else { return nil }
             let traits = try personalityTraits(companionId: id, db: db)
             let appearance = try appearanceAttributes(companionId: id, db: db)
+            let voiceId = try String.fetchOne(db, sql: "SELECT system_voice_id FROM voice WHERE companion_id = ?", arguments: [id])
             return CompanionInfo(
                 id: row["id"],
                 name: row["name"],
                 relationshipStage: row["relationship_stage"],
                 turnCount: row["turn_count"],
+                glbAsset: row["glb_asset"],
                 createdAt: row["created_at"],
                 traits: traits,
-                appearance: appearance
+                appearance: appearance,
+                voiceId: voiceId
             )
         }
     }
@@ -251,9 +261,11 @@ struct CompanionInfo: Identifiable, Hashable {
     let name: String
     let relationshipStage: String
     let turnCount: Int
+    let glbAsset: String?
     let createdAt: Date
     let traits: [(String, Double)]
     let appearance: [(String, String)]
+    let voiceId: String?
 
     var level: Int { min(turnCount / 5 + 1, 50) }
 
@@ -271,4 +283,26 @@ struct MemoryInfo {
     let kind: String
     let salience: Double
     let createdAt: Date
+}
+
+import AVFoundation
+
+struct VoicePicker {
+    private static var cachedVoices: [AVSpeechSynthesisVoice] = {
+        AVSpeechSynthesisVoice.speechVoices()
+    }()
+
+    static func selectVoice() -> String {
+        let enVoices = cachedVoices.filter { $0.language.hasPrefix("en") }
+        return enVoices.first?.identifier ?? "com.apple.voice.compact.en-US.Samantha"
+    }
+
+    static func selectVoice(gender: AVSpeechSynthesisVoiceGender) -> String {
+        let match = cachedVoices.first { $0.language.hasPrefix("en") && $0.gender == gender }
+        return match?.identifier ?? selectVoice()
+    }
+
+    static func refreshCache() {
+        cachedVoices = AVSpeechSynthesisVoice.speechVoices()
+    }
 }

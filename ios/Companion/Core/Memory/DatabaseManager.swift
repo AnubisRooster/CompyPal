@@ -29,6 +29,7 @@ actor DatabaseManager {
                 t.column("name", .text).notNull()
                 t.column("relationship_stage", .text).notNull().defaults(to: "acquaintance")
                 t.column("turn_count", .integer).notNull().defaults(to: 0)
+                t.column("glb_asset", .text)
                 t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
             }
             try db.create(table: "personality_trait") { t in

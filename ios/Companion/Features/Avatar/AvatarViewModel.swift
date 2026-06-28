@@ -103,9 +103,7 @@ final class AvatarViewModel: ObservableObject {
     func applyReferenceImage(_ data: Data?) {
         referenceImageData = data
         guard let data, let image = UIImage(data: data) else { return }
-        let head = controller.sceneView.scene?.rootNode.childNode(withName: "procedural_head", recursively: true)
-        head?.geometry?.materials.forEach { $0.diffuse.contents = image }
-        head?.geometry?.materials.forEach { $0.roughness.contents = 0.8 }
+        controller.applyReferenceImage(image)
     }
 
     // MARK: - Performance / Speech
@@ -120,6 +118,16 @@ final class AvatarViewModel: ObservableObject {
 
     func updateSpeechRange(characterRange: NSRange, text: String) {
         performanceDirector.updateSpeechRange(characterRange: characterRange, text: text)
+        let energy = energyForRange(characterRange, text: text)
+        lipSyncSystem.enqueueEnergy(energy, timestamp: CACurrentMediaTime())
+    }
+
+    private func energyForRange(_ range: NSRange, text: String) -> Float {
+        guard let swiftRange = Range(range, in: text) else { return 0 }
+        let snippet = text[swiftRange].lowercased()
+        let vowelCount = snippet.filter { "aeiou".contains($0) }.count
+        let total = max(snippet.count, 1)
+        return min(Float(vowelCount) / Float(total) * 1.5, 1.0)
     }
 
     func endSpeaking() {

@@ -63,7 +63,7 @@ class ChatViewModel: ObservableObject {
         if let imgData = await imageGenService.cachedImageData(companionId: companion.id) {
             avatarViewModel.applyReferenceImage(imgData)
         }
-        if let glbAsset = companion.appearance.first(where: { $0.0 == "glb_asset" })?.1 {
+        if let glbAsset = companion.glbAsset {
             await avatarViewModel.loadGLB(named: glbAsset)
         }
     }
@@ -149,22 +149,10 @@ class ChatViewModel: ObservableObject {
             if hasAppearanceIntent(text: trimmed) {
                 await handleAppearanceIntent(userText: trimmed, catalog: catalog)
             }
-            let (cleanText, track) = Self.parsePerformanceReply(fullReply)
+            let (cleanText, track) = PerformanceTrackParser.extract(from: fullReply)
             messages[msgIndex].text = cleanText
-            avatarViewModel.beginSpeaking(text: cleanText, track: track)
-            speakReply(cleanText)
+            speakReply(cleanText, track: track)
         }
-    }
-
-    private static func parsePerformanceReply(_ reply: String) -> (String, PerformanceTrack?) {
-        guard let range = reply.range(of: "PERFORMANCE:"),
-              let start = reply[range.upperBound...].firstIndex(of: "{"),
-              let end = reply[range.upperBound...].balancedClose(from: start)
-        else { return (reply, nil) }
-        let jsonChunk = String(reply[start...end])
-        let cleanText = reply[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
-        let track = PerformanceTrackParser.parse(raw: jsonChunk)
-        return (cleanText, track)
     }
 
     func cancelStream() {
@@ -203,35 +191,35 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    private func speakReply(_ text: String) {
+    private func speakReply(_ text: String, track: PerformanceTrack? = nil) {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .default)
         try? session.setActive(true)
 
+        let voiceId = companion.voiceId ?? VoicePicker.selectVoice()
+        var hasStarted = false
+
         ttsEngine.speak(
             text,
-            voiceId: companionVoiceId(),
+            voiceId: voiceId,
             pitch: 1.0,
-            rate: 0.5
-        ) { [weak self] pcmBuffer, charOffset in
-            guard let self else { return }
-            self.avatarViewModel.lipSyncSystem.processAudioBuffer(pcmBuffer)
-            let nsRange = NSRange(location: charOffset, length: 0)
-            self.avatarViewModel.updateSpeechRange(characterRange: nsRange, text: text)
-        }
-        isSpeaking = true
-
-        Task {
-            while ttsEngine.isSpeaking {
-                try? await Task.sleep(nanoseconds: 50_000_000)
+            rate: 0.5,
+            rangeCallback: { [weak self] nsRange in
+                guard let self else { return }
+                if !hasStarted {
+                    hasStarted = true
+                    self.avatarViewModel.beginSpeaking(text: text, track: track)
+                    self.isSpeaking = true
+                }
+                self.avatarViewModel.updateSpeechRange(characterRange: nsRange, text: text)
+            },
+            completion: { [weak self] in
+                Task { @MainActor in
+                    self?.isSpeaking = false
+                    self?.avatarViewModel.endSpeaking()
+                }
             }
-            isSpeaking = false
-            avatarViewModel.endSpeaking()
-        }
-    }
-
-    private func companionVoiceId() -> String {
-        MemoryStore.selectVoice()
+        )
     }
 
     func cachedImageData(companionId: Int64) async -> Data? {

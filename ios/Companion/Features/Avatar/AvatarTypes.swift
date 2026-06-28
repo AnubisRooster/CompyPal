@@ -1,5 +1,6 @@
 import Foundation
 import SceneKit
+import UIKit
 
 // MARK: - Bounded vocabularies (AVATAR_SPEC §4)
 
@@ -94,6 +95,7 @@ protocol AvatarController: AnyObject {
 
     func load(_ descriptor: AvatarDescriptor) async throws
     func applyAppearance(_ attributes: [(String, String)])
+    func applyReferenceImage(_ image: UIImage)
     func attachGarment(_ garment: GarmentAsset) async throws
     func detachGarment(slot: WardrobeSlot)
     func setViseme(_ viseme: Viseme, weight: Float)
@@ -190,12 +192,10 @@ struct PerformanceTrackParser {
               var track = try? JSONDecoder().decode(PerformanceTrack.self, from: data)
         else { return nil }
 
-        // Validate emotion
         if Emotion(rawValue: track.emotion) == nil {
             track.emotion = "neutral"
         }
 
-        // Validate beats
         if let beats = track.beats {
             track.beats = beats.filter { beat in
                 if let em = beat.emotion, Emotion(rawValue: em) == nil { return false }
@@ -205,6 +205,34 @@ struct PerformanceTrackParser {
         }
 
         return track
+    }
+
+    static func extract(from reply: String) -> (clean: String, track: PerformanceTrack?) {
+        // Strategy 1: look for PERFORMANCE: prefix + JSON
+        if let range = reply.range(of: "PERFORMANCE:"),
+           let start = reply[range.upperBound...].firstIndex(of: "{"),
+           let end = reply[range.upperBound...].balancedClose(from: start) {
+            let jsonChunk = String(reply[start...end])
+            let clean = reply[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            let track = parse(raw: jsonChunk)
+            return (clean, track)
+        }
+
+        // Strategy 2: try any balanced JSON block with text+emotion keys
+        if let start = reply.firstIndex(of: "{"),
+           let end = reply[start...].balancedClose() {
+            let jsonChunk = String(reply[start...end])
+            if let data = jsonChunk.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               obj["text"] as? String != nil,
+               obj["emotion"] as? String != nil {
+                let clean = (reply[..<start] + (reply[end...].dropFirst())).trimmingCharacters(in: .whitespacesAndNewlines)
+                let track = parse(raw: jsonChunk)
+                return (clean, track)
+            }
+        }
+
+        return (reply, nil)
     }
 }
 

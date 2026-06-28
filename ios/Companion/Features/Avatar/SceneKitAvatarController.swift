@@ -1,8 +1,7 @@
 import SceneKit
-import SceneKit.ModelIO
 import SwiftUI
-import ModelIO
 import OSLog
+import GLTFKit2
 
 private let avatarLog = Logger(subsystem: "ai.companion", category: "avatar")
 
@@ -30,11 +29,13 @@ final class SceneKitAvatarController: AvatarController {
 
     // State
     private var hasGLB = false
+    var isGLBLoaded: Bool { hasGLB }
     private var currentEmotion: Emotion = .neutral
     private var currentEmotionIntensity: Float = 0
     private var currentGaze: GazeTarget = .camera
     private var isIdleEnabled = true
     private var appearanceColorMap: [String: UIColor] = [:]
+    private var morpherIndex: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
 
     init() {
         scene = SCNScene()
@@ -68,6 +69,26 @@ final class SceneKitAvatarController: AvatarController {
         hasGLB = false
     }
 
+    func applyReferenceImage(_ image: UIImage) {
+        if hasGLB, let root = glbRootNode {
+            var applied = false
+            root.enumerateChildNodes { node, stop in
+                guard let geo = node.geometry, geo.materials.contains(where: { $0.diffuse.contents is UIImage }) else { return }
+                geo.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
+                applied = true
+                stop.pointee = ObjCBool(true)
+            }
+            if !applied {
+                root.enumerateChildNodes { node, _ in
+                    node.geometry?.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
+                }
+            }
+        } else {
+            let head = scene.rootNode.childNode(withName: "procedural_head", recursively: true)
+            head?.geometry?.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
+        }
+    }
+
     func applyAppearance(_ attributes: [(String, String)]) {
         for (key, value) in attributes {
             if let color = ParametricSchema.shared.color(for: key, value: value) {
@@ -81,9 +102,11 @@ final class SceneKitAvatarController: AvatarController {
         let garmentURL = Bundle.main.url(forResource: garment.glbName, withExtension: "glb")
         guard let url = garmentURL else { throw AvatarError.garmentNotFound(garment.glbName) }
 
-        let mdlAsset = MDLAsset(url: url)
-        mdlAsset.loadTextures()
-        let scene = SCNScene(mdlAsset: mdlAsset)
+        let gltfAsset = try GLTFAsset(url: url, options: [:])
+        let source = GLTFSCNSceneSource(asset: gltfAsset)
+        guard let scene = source.defaultScene else {
+            throw AvatarError.garmentLoadFailed
+        }
         guard let garmentNode = scene.rootNode.childNodes.first else {
             throw AvatarError.garmentLoadFailed
         }
@@ -265,17 +288,18 @@ final class SceneKitAvatarController: AvatarController {
     }
 
     private func loadGLB(url: URL) throws {
-        let mdlAsset = MDLAsset(url: url)
-        mdlAsset.loadTextures()
-        let glbScene = SCNScene(mdlAsset: mdlAsset)
+        let gltfAsset = try GLTFAsset(url: url, options: [:])
+        let source = GLTFSCNSceneSource(asset: gltfAsset)
+        guard let glbScene = source.defaultScene else { throw AvatarError.glbLoadFailed }
         guard let glbRoot = glbScene.rootNode.childNodes.first else {
-            avatarLog.error("MDLAsset produced no root nodes from \(url.lastPathComponent)")
+            avatarLog.error("GLTFKit2 produced no root nodes from \(url.lastPathComponent)")
             throw AvatarError.glbLoadFailed
         }
         glbRootNode = glbRoot
         rootNode.addChildNode(glbRoot)
 
         headNode?.isHidden = true
+        buildMorpherIndex()
     }
 
     // MARK: - Appearance
@@ -318,23 +342,32 @@ final class SceneKitAvatarController: AvatarController {
     // MARK: - Morph targets
 
     func setMorphWeight(named name: String, weight: Float) {
-        let searchNodes = hasGLB ? [glbRootNode].compactMap { $0 } : [headNode].compactMap { $0 }
-        for node in searchNodes {
-            walkNodeTree(node) { n in
-                guard let morpher = n.morpher else { return }
-                for (i, target) in morpher.targets.enumerated() {
-                    if target.name == name || target.name?.contains(name) == true {
-                        morpher.setWeight(CGFloat(weight), forTargetAt: i)
-                    }
+        if hasGLB, let entry = morpherIndex[name] {
+            entry.morpher.setWeight(CGFloat(weight), forTargetAt: entry.targetIndex)
+            return
+        }
+        for node in [headNode].compactMap({ $0 }) {
+            guard let morpher = node.morpher else { continue }
+            for (i, target) in morpher.targets.enumerated() {
+                if target.name == name || target.name?.contains(name) == true {
+                    morpher.setWeight(CGFloat(weight), forTargetAt: i)
                 }
             }
         }
     }
 
-    private func walkNodeTree(_ node: SCNNode, visit: (SCNNode) -> Void) {
-        visit(node)
-        for child in node.childNodes {
-            walkNodeTree(child, visit: visit)
+    private func buildMorpherIndex() {
+        morpherIndex.removeAll(keepingCapacity: true)
+        guard let root = glbRootNode else { return }
+        root.enumerateChildNodes { node, _ in
+            guard let morpher = node.morpher else { return }
+            for (i, target) in morpher.targets.enumerated() {
+                let key = target.name ?? "target_\(i)"
+                morpherIndex[key] = (morpher, i)
+                if let altName = rigMapping?.visemes.first(where: { $0.value == key })?.key {
+                    morpherIndex[altName] = (morpher, i)
+                }
+            }
         }
     }
 
@@ -477,9 +510,15 @@ final class SceneKitAvatarController: AvatarController {
     // MARK: - Body mask for garments
 
     private func applyBodyMask(slot: WardrobeSlot, regions: Set<String>?, hidden: Bool) {
-        // Hide base body mesh regions to prevent poke-through
-        guard let head = headMeshNode else { return }
-        head.isHidden = hidden && slot == .headwear
+        guard let root = glbRootNode ?? headMeshNode else { return }
+        guard let regions, !regions.isEmpty else {
+            root.isHidden = hidden && slot == .headwear
+            return
+        }
+        root.enumerateChildNodes { node, _ in
+            guard let name = node.name, regions.contains(name) else { return }
+            node.isHidden = hidden
+        }
     }
 }
 

@@ -43,6 +43,20 @@ struct CompanionAvatarView: View {
             if showDebug {
                 debugOverlay
             }
+
+            if let error = viewModel.errorMessage {
+                VStack {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.red.opacity(0.8))
+                        .cornerRadius(8)
+                    Spacer()
+                }
+                .padding(.top, 8)
+            }
         }
         .onAppear {
             viewModel.start()

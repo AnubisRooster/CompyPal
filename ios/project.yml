@@ -9,6 +9,9 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: 6.29.0
+  GLTFKit2:
+    url: https://github.com/warrenm/GLTFKit2
+    from: 0.5.15
 
 settings:
   SWIFT_VERSION: "5.9"
@@ -39,6 +42,7 @@ targets:
         NSSpeechRecognitionUsageDescription: "Companion uses speech recognition to transcribe your voice."
     dependencies:
       - package: GRDB
+      - package: GLTFKit2
     preBuildScripts:
       - name: "Regenerate XcodeGen"
         script: |
