@@ -15,17 +15,19 @@ struct CompanionsView: View {
         NavigationStack {
             Group {
                 if viewModel.isOffline {
-                    ContentUnavailableView(
-                        "Offline",
-                        systemImage: "wifi.slash",
-                        description: Text("Select a companion from earlier sessions.")
-                    )
+                        ContentUnavailableView(
+                            "Offline",
+                            systemImage: "wifi.slash",
+                            description: Text("Select a companion from earlier sessions.")
+                        )
+                        .accessibilityLabel("Offline. Select a companion from earlier sessions.")
                 } else if viewModel.companions.isEmpty {
                     ContentUnavailableView(
                         "No Companions",
                         systemImage: "person.3",
                         description: Text("Tap + to create your first companion.")
                     )
+                    .accessibilityLabel("No companions. Tap the plus button to create one.")
                 } else {
                     List {
                         ForEach(viewModel.companions) { companion in
@@ -110,6 +112,7 @@ struct CompanionRow: View {
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
     }

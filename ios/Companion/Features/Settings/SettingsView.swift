@@ -47,13 +47,21 @@ struct SettingsView: View {
                 }
 
                 Section("TTS Speed") {
-                    Slider(value: $ttsRate, in: 0.25...1.0, step: 0.05) {
-                        Text("Speech Rate")
-                    } minimumValueLabel: {
-                        Text("Slow").font(.caption)
-                    } maximumValueLabel: {
-                        Text("Fast").font(.caption)
+                    VStack(alignment: .leading) {
+                        Slider(value: $ttsRate, in: 0.25...1.0, step: 0.05) {
+                            Text("Speech Rate")
+                        } minimumValueLabel: {
+                            Text("Slow").font(.caption)
+                        } maximumValueLabel: {
+                            Text("Fast").font(.caption)
+                        }
+                        Text("\(Int(ttsRate * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .accessibilityHidden(true)
                     }
+                    .accessibilityLabel("Speech rate")
+                    .accessibilityValue("\(Int(ttsRate * 100)) percent")
                 }
 
                 Section("Image Generation") {

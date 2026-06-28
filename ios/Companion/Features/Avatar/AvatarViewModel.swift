@@ -67,7 +67,7 @@ final class AvatarViewModel: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
-        idleSystem.setEnabled(true)
+        idleSystem.setEnabled(!UIAccessibility.isReduceMotionEnabled)
         startDisplayLink()
     }
 

@@ -51,12 +51,25 @@ struct ChatView: View {
             .padding(8)
             .frame(maxWidth: .infinity)
             .background(Color.orange.opacity(0.2))
+            .accessibilityHint("Internet connection required for chat")
         }
     }
 
     private var companionHeader: some View {
         CompanionAvatarView(viewModel: viewModel.avatarViewModel)
             .frame(height: 220)
+            .accessibilityLabel(avatarAccessibilityLabel)
+            .accessibilityAddTraits(.isImage)
+    }
+
+    private var avatarAccessibilityLabel: String {
+        let name = viewModel.companion.name
+        let state: String
+        if viewModel.isSpeaking { state = "Speaking" }
+        else if viewModel.isListening { state = "Listening" }
+        else if viewModel.avatarViewModel.isThinking { state = "Thinking" }
+        else { state = "Idle" }
+        return "\(name) avatar. \(state)"
     }
 
     private var scrollView: some View {
@@ -66,7 +79,15 @@ struct ChatView: View {
                     ForEach(viewModel.messages) { msg in
                         MessageBubble(message: msg, isStreaming: viewModel.isStreaming && msg.id == viewModel.messages.last?.id)
                     }
-                    if viewModel.isStreaming {
+                    if viewModel.isReconnecting {
+                        HStack {
+                            Label("Reconnecting...", systemImage: "antenna.radiowaves.left.and.right")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                                .padding(.leading)
+                            Spacer()
+                        }
+                    } else if viewModel.isStreaming {
                         HStack {
                             DotLoader()
                                 .padding(.leading)
@@ -143,6 +164,7 @@ struct DotLoader: View {
                     .opacity(0.5)
             }
         }
+        .accessibilityHidden(true)
     }
 }
 
