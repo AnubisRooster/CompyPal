@@ -55,6 +55,7 @@ final class LipSyncSystem {
         let viseme = visemeForEnergy(energy)
         visemeQueue.append((viseme, energy, timestamp))
         processQueue()
+        controller?.setViseme(viseme, weight: energy)
     }
 
     func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {

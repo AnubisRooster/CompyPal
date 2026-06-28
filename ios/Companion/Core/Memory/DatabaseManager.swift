@@ -29,7 +29,6 @@ actor DatabaseManager {
                 t.column("name", .text).notNull()
                 t.column("relationship_stage", .text).notNull().defaults(to: "acquaintance")
                 t.column("turn_count", .integer).notNull().defaults(to: 0)
-                t.column("glb_asset", .text)
                 t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
             }
             try db.create(table: "personality_trait") { t in
@@ -67,6 +66,13 @@ actor DatabaseManager {
                 t.column("role", .text).notNull()
                 t.column("text", .text).notNull()
                 t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+            }
+        }
+        migrator.registerMigration("v2_glb_asset") { db in
+            let columns = try db.columns(in: "companion").map(\.name)
+            if columns.contains("glb_asset") { return }
+            try db.alter(table: "companion") { t in
+                t.add(column: "glb_asset", .text)
             }
         }
         try migrator.migrate(db)

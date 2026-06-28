@@ -108,12 +108,15 @@ final class AvatarViewModel: ObservableObject {
 
     // MARK: - Performance / Speech
 
-    func beginSpeaking(text: String, track: PerformanceTrack?) {
+    private var pcmEnergies: [Float] = []
+
+    func beginSpeaking(text: String, track: PerformanceTrack?, pcmEnergies: [Float] = []) {
         isSpeaking = true
         isThinking = false
         idleSystem.setEnabled(false)
         performanceDirector.beginPerformance(text: text, track: track)
         controller.setViseme(.sil, weight: 0)
+        self.pcmEnergies = pcmEnergies
     }
 
     func updateSpeechRange(characterRange: NSRange, text: String) {
@@ -123,6 +126,11 @@ final class AvatarViewModel: ObservableObject {
     }
 
     private func energyForRange(_ range: NSRange, text: String) -> Float {
+        if !pcmEnergies.isEmpty {
+            let progress = Double(range.location) / Double(max(text.count, 1))
+            let idx = min(Int(progress * Double(pcmEnergies.count)), pcmEnergies.count - 1)
+            return idx >= 0 ? pcmEnergies[idx] : 0
+        }
         guard let swiftRange = Range(range, in: text) else { return 0 }
         let snippet = text[swiftRange].lowercased()
         let vowelCount = snippet.filter { "aeiou".contains($0) }.count

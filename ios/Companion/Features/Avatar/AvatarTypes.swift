@@ -208,27 +208,39 @@ struct PerformanceTrackParser {
     }
 
     static func extract(from reply: String) -> (clean: String, track: PerformanceTrack?) {
+        let base = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip markdown code fences before searching for JSON
+        let stripped: String
+        if base.hasPrefix("```") {
+            stripped = base
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            stripped = base
+        }
+
         // Strategy 1: look for PERFORMANCE: prefix + JSON
-        if let range = reply.range(of: "PERFORMANCE:"),
-           let start = reply[range.upperBound...].firstIndex(of: "{"),
-           let end = reply[range.upperBound...].balancedClose(from: start) {
-            let jsonChunk = String(reply[start...end])
-            let clean = reply[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = stripped.range(of: "PERFORMANCE:"),
+           let start = stripped[range.upperBound...].firstIndex(of: "{"),
+           let end = stripped[range.upperBound...].balancedClose(from: start) {
+            let jsonChunk = String(stripped[start...end])
+            let cleanText = String(stripped[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             let track = parse(raw: jsonChunk)
-            return (clean, track)
+            return (cleanText, track)
         }
 
         // Strategy 2: try any balanced JSON block with text+emotion keys
-        if let start = reply.firstIndex(of: "{"),
-           let end = reply[start...].balancedClose() {
-            let jsonChunk = String(reply[start...end])
+        if let start = stripped.firstIndex(of: "{"),
+           let end = stripped[start...].balancedClose() {
+            let jsonChunk = String(stripped[start...end])
             if let data = jsonChunk.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                obj["text"] as? String != nil,
                obj["emotion"] as? String != nil {
-                let clean = (reply[..<start] + (reply[end...].dropFirst())).trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleanText = (stripped[..<start] + (stripped[end...].dropFirst())).trimmingCharacters(in: .whitespacesAndNewlines)
                 let track = parse(raw: jsonChunk)
-                return (clean, track)
+                return (cleanText, track)
             }
         }
 

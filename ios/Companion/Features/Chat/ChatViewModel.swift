@@ -204,11 +204,11 @@ class ChatViewModel: ObservableObject {
             voiceId: voiceId,
             pitch: 1.0,
             rate: 0.5,
-            rangeCallback: { [weak self] nsRange in
+            rangeCallback: { [weak self] nsRange, pcmEnergies in
                 guard let self else { return }
                 if !hasStarted {
                     hasStarted = true
-                    self.avatarViewModel.beginSpeaking(text: text, track: track)
+                    self.avatarViewModel.beginSpeaking(text: text, track: track, pcmEnergies: pcmEnergies)
                     self.isSpeaking = true
                 }
                 self.avatarViewModel.updateSpeechRange(characterRange: nsRange, text: text)

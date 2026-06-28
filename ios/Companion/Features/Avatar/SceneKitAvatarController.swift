@@ -73,14 +73,18 @@ final class SceneKitAvatarController: AvatarController {
         if hasGLB, let root = glbRootNode {
             var applied = false
             root.enumerateChildNodes { node, stop in
+                guard let name = node.name?.lowercased(), name.contains("face") else { return }
                 guard let geo = node.geometry, geo.materials.contains(where: { $0.diffuse.contents is UIImage }) else { return }
                 geo.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
                 applied = true
                 stop.pointee = ObjCBool(true)
             }
             if !applied {
-                root.enumerateChildNodes { node, _ in
-                    node.geometry?.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
+                root.enumerateChildNodes { node, stop in
+                    guard let geo = node.geometry else { return }
+                    geo.materials.forEach { $0.diffuse.contents = image; $0.roughness.contents = 0.8 }
+                    applied = true
+                    stop.pointee = ObjCBool(true)
                 }
             }
         } else {
@@ -300,6 +304,7 @@ final class SceneKitAvatarController: AvatarController {
 
         headNode?.isHidden = true
         buildMorpherIndex()
+        recoverMorphTargetNames(from: url)
     }
 
     // MARK: - Appearance
@@ -369,6 +374,65 @@ final class SceneKitAvatarController: AvatarController {
                 }
             }
         }
+    }
+
+    /// GLTFKit2 may strip morph target names from glTF assets.
+    /// Fall back to parsing the GLB JSON chunk to recover extras.targetNames.
+    private func recoverMorphTargetNames(from glbURL: URL) {
+        guard morpherIndex.keys.contains(where: { $0.hasPrefix("target_") }) else { return }
+        guard let data = try? Data(contentsOf: glbURL) else { return }
+        // GLB header: magic(4) + version(4) + length(4) = 12 bytes
+        // Then chunks: chunkLength(4) + chunkType(4) + chunkData(chunkLength)
+        var offset = 12
+        let totalLength = data.count
+        var jsonString: String?
+        while offset + 8 <= totalLength {
+            let chunkLength = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }
+            let chunkType = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self) }
+            offset += 8
+            if chunkType == 0x4E4F534A {
+                let chunkData = data[offset..<offset + Int(chunkLength)]
+                jsonString = String(data: chunkData, encoding: .utf8)
+                break
+            }
+            offset += Int(chunkLength)
+        }
+        guard let json = jsonString, let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return }
+        guard let meshes = obj["meshes"] as? [[String: Any]] else { return }
+
+        // Build a mapping from generic target_N names to real names
+        var nameMap: [String: String] = [:]
+        for mesh in meshes {
+            guard let primitives = mesh["primitives"] as? [[String: Any]] else { continue }
+            for primitive in primitives {
+                guard let targets = primitive["targets"] as? [[String: Any]] else { continue }
+                for (i, target) in targets.enumerated() {
+                    guard let extras = target["extras"] as? [String: Any],
+                          let names = extras["targetNames"] as? [String],
+                          i < names.count else { continue }
+                    nameMap["target_\(i)"] = names[i]
+                }
+            }
+        }
+        guard !nameMap.isEmpty else { return }
+
+        // Rebuild index with real names
+        var rebuilt: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
+        for (key, entry) in morpherIndex {
+            if let realName = nameMap[key] {
+                rebuilt[realName] = entry
+                rebuilt[key] = entry
+                if let altName = rigMapping?.visemes.first(where: { $0.value == key })?.key {
+                    rebuilt[altName] = entry
+                }
+                if let altName = rigMapping?.visemes.first(where: { $0.value == realName })?.key {
+                    rebuilt[altName] = entry
+                }
+            } else {
+                rebuilt[key] = entry
+            }
+        }
+        morpherIndex = rebuilt
     }
 
     // MARK: - Procedural animation
