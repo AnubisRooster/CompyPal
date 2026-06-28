@@ -29,7 +29,7 @@ actor DatabaseManager {
                 t.column("name", .text).notNull()
                 t.column("relationship_stage", .text).notNull().defaults(to: "acquaintance")
                 t.column("turn_count", .integer).notNull().defaults(to: 0)
-                t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.column("created_at", .datetime).notNull()
             }
             try db.create(table: "personality_trait") { t in
                 t.autoIncrementedPrimaryKey("id")
@@ -58,14 +58,14 @@ actor DatabaseManager {
                 t.column("kind", .text).notNull()
                 t.column("salience", .double).notNull().defaults(to: 0.5)
                 t.column("source_turn_id", .integer).references("conversation_turn", onDelete: .setNull)
-                t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.column("created_at", .datetime).notNull()
             }
             try db.create(table: "conversation_turn") { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("companion_id", .integer).notNull().references("companion", onDelete: .cascade)
                 t.column("role", .text).notNull()
                 t.column("text", .text).notNull()
-                t.column("created_at", .datetime).notNull().defaults(sql: "CURRENT_TIMESTAMP")
+                t.column("created_at", .datetime).notNull()
             }
         }
         migrator.registerMigration("v2_glb_asset") { db in
@@ -74,6 +74,11 @@ actor DatabaseManager {
             try db.alter(table: "companion") { t in
                 t.add(column: "glb_asset", .text)
             }
+        }
+        migrator.registerMigration("v3_fix_date_format") { db in
+            try db.execute(sql: "UPDATE companion SET created_at = ? WHERE created_at IS NOT NULL", arguments: [Date()])
+            try db.execute(sql: "UPDATE memory SET created_at = ? WHERE created_at IS NOT NULL", arguments: [Date()])
+            try db.execute(sql: "UPDATE conversation_turn SET created_at = ? WHERE created_at IS NOT NULL", arguments: [Date()])
         }
         try migrator.migrate(db)
     }

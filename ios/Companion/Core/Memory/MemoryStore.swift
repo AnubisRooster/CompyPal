@@ -53,7 +53,7 @@ final class MemoryStore: @unchecked Sendable {
         let queue = try await db.open()
         let resolvedVoice = voiceId ?? VoicePicker.selectVoice()
         return try await queue.write { db in
-            try db.execute(sql: "INSERT INTO companion (user_id, name, glb_asset) VALUES (?, ?, ?)", arguments: [userId, name, glbAsset])
+            try db.execute(sql: "INSERT INTO companion (user_id, name, glb_asset, created_at) VALUES (?, ?, ?, ?)", arguments: [userId, name, glbAsset, Date()])
             let companionId = db.lastInsertedRowID
             for (traitName, intensity) in traits {
                 try db.execute(sql: "INSERT INTO personality_trait (companion_id, name, intensity) VALUES (?, ?, ?)", arguments: [companionId, traitName, intensity])
@@ -77,7 +77,7 @@ final class MemoryStore: @unchecked Sendable {
         let queue = try await db.open()
         return try await queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT c.id, c.name, c.relationship_stage, c.turn_count, c.created_at
+                SELECT c.id, c.name, c.relationship_stage, c.turn_count, c.created_at, c.glb_asset
                 FROM companion c WHERE c.user_id = ?
                 ORDER BY c.created_at DESC
             """, arguments: [userId])
@@ -127,7 +127,7 @@ final class MemoryStore: @unchecked Sendable {
     func insertTurn(companionId: Int64, role: String, text: String) async throws -> Int64 {
         let queue = try await db.open()
         return try await queue.write { db in
-            try db.execute(sql: "INSERT INTO conversation_turn (companion_id, role, text) VALUES (?, ?, ?)", arguments: [companionId, role, text])
+            try db.execute(sql: "INSERT INTO conversation_turn (companion_id, role, text, created_at) VALUES (?, ?, ?, ?)", arguments: [companionId, role, text, Date()])
             let turnId = db.lastInsertedRowID
             try db.execute(sql: "UPDATE companion SET turn_count = turn_count + 1 WHERE id = ?", arguments: [companionId])
             return turnId
@@ -151,9 +151,9 @@ final class MemoryStore: @unchecked Sendable {
         let queue = try await db.open()
         try await queue.write { db in
             try db.execute(sql: """
-                INSERT INTO memory (user_id, companion_id, content, kind, salience, source_turn_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, arguments: [userId, companionId, content, kind, salience, sourceTurnId])
+                INSERT INTO memory (user_id, companion_id, content, kind, salience, source_turn_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [userId, companionId, content, kind, salience, sourceTurnId, Date()])
         }
     }
 
