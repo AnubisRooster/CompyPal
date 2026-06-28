@@ -63,6 +63,9 @@ class ChatViewModel: ObservableObject {
         if let imgData = await imageGenService.cachedImageData(companionId: companion.id) {
             avatarViewModel.applyReferenceImage(imgData)
         }
+        if companion.name == "Riven" {
+            await avatarViewModel.loadGLB(named: "riven")
+        }
     }
 
     func sendText(_ text: String) async {

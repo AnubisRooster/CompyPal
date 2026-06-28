@@ -123,15 +123,22 @@ final class SceneKitAvatarController: AvatarController {
         currentEmotion = emotion
         currentEmotionIntensity = intensity
 
-        let weights = emotion.arkitWeights()
         SCNTransaction.begin()
         SCNTransaction.animationDuration = blendDuration
 
-        for (morphName, baseWeight) in weights.morphs {
-            setMorphWeight(named: morphName, weight: baseWeight * intensity)
+        if hasGLB, let mapping = rigMapping, let morphs = mapping.emotions[emotion.rawValue] {
+            // Use VRM blend shapes from rig mapping
+            for (morphName, baseWeight) in morphs {
+                setMorphWeight(named: morphName, weight: baseWeight * intensity)
+            }
+        } else {
+            // Fall back to ARKit-style morph names
+            let weights = emotion.arkitWeights()
+            for (morphName, baseWeight) in weights.morphs {
+                setMorphWeight(named: morphName, weight: baseWeight * intensity)
+            }
         }
 
-        // Procedural brow animation
         if !hasGLB {
             animateBrows(for: emotion, intensity: intensity)
         }

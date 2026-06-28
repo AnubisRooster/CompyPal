@@ -72,6 +72,15 @@ final class AvatarViewModel: ObservableObject {
 
     // MARK: - Appearance
 
+    func loadGLB(named glbName: String) async {
+        guard let glbURL = Bundle.main.url(forResource: glbName, withExtension: "glb") else { return }
+        let descriptor = AvatarDescriptor(
+            glbURL: glbURL,
+            rigMappingURL: Bundle.main.url(forResource: "RigMapping", withExtension: "json")
+        )
+        try? await controller.load(descriptor)
+    }
+
     func applyAppearance(_ attributes: [(String, String)]) {
         appearanceAttributes = attributes
         controller.applyAppearance(attributes)
