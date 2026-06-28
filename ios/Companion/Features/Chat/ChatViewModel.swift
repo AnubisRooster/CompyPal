@@ -128,6 +128,10 @@ class ChatViewModel: ObservableObject {
                     break
                 } catch is CancellationError {
                     return
+                } catch ClientError.unauthorized {
+                    invalidateKey()
+                    errorMessage = ClientError.unauthorized.description
+                    break
                 } catch {
                     if !fullReply.isEmpty && retries < maxRetries {
                         retries += 1
@@ -310,8 +314,17 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    private func invalidateKey() {
+        hasApiKey = false
+        Task {
+            await keychain.delete(key: KeychainService.apiKeyAccount)
+            await client.setKey("")
+        }
+    }
+
+
     private func loadApiKey() async {
-        if let key = await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty {
+        if let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty {
             await client.setKey(key)
             hasApiKey = true
         } else {

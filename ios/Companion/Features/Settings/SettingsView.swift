@@ -105,11 +105,14 @@ struct SettingsView: View {
     }
 
     private func loadKey() {
-        let key = keychain.read(key: KeychainService.apiKeyAccount)
-        if let key, !key.isEmpty {
+        do {
+            let key = try keychain.read(key: KeychainService.apiKeyAccount)
+            guard !key.isEmpty else { return }
             savedKey = key
             apiKey = key
             statusMessage = "Key loaded from secure storage."
+        } catch {
+            statusMessage = "Could not read key: \(error)"
         }
     }
 

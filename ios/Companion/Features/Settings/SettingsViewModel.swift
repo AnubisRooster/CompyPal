@@ -33,7 +33,7 @@ class SettingsViewModel: ObservableObject {
     }
 
     func loadKey() async {
-        let key = await keychain.read(key: KeychainService.apiKeyAccount) ?? ""
+        let key = (try? await keychain.read(key: KeychainService.apiKeyAccount)) ?? ""
         apiKey = key
         if !key.isEmpty {
             await client.setKey(key)
@@ -49,7 +49,7 @@ class SettingsViewModel: ObservableObject {
     func testConnection() async {
         connectionStatus = .testing
         do {
-            let key = await keychain.read(key: KeychainService.apiKeyAccount) ?? ""
+            let key = (try? await keychain.read(key: KeychainService.apiKeyAccount)) ?? ""
             guard !key.isEmpty else { throw ClientError.noKey }
             await client.setKey(key)
 
@@ -71,7 +71,7 @@ class SettingsViewModel: ObservableObject {
 
     func refreshCatalog() async {
         catalogStatus = .refreshing
-        guard let key = await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else {
+        guard let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else {
             catalogStatus = .failed("No API key")
             return
         }

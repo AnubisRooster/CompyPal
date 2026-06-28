@@ -47,7 +47,7 @@ private class CatalogRefreshChecker {
 
     func refreshIfStale() async {
         guard await cache.isStale() else { return }
-        guard let key = await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else { return }
+        guard let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else { return }
         do {
             let entries = try await fetcher.fetch(apiKey: key)
             try await cache.save(entries: entries)

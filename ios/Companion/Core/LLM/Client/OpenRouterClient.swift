@@ -51,6 +51,10 @@ actor OpenRouterClient {
                         continuation.finish(throwing: ClientError.invalidResponse)
                         return
                     }
+                    guard http.statusCode != 401 else {
+                        continuation.finish(throwing: ClientError.unauthorized)
+                        return
+                    }
                     guard http.statusCode == 200 else {
                         continuation.finish(throwing: ClientError.httpError(http.statusCode))
                         return
@@ -119,8 +123,10 @@ actor OpenRouterClient {
         req.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw ClientError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
+        guard http.statusCode != 401 else { throw ClientError.unauthorized }
+        guard http.statusCode == 200 else {
+            throw ClientError.httpError(http.statusCode)
         }
         let decoded = try decoder.decode(ImageResponse.self, from: data)
 
@@ -135,10 +141,20 @@ actor OpenRouterClient {
     }
 }
 
-enum ClientError: Error {
+enum ClientError: Error, CustomStringConvertible {
     case noKey
     case invalidResponse
     case httpError(Int)
+    case unauthorized
+
+    var description: String {
+        switch self {
+        case .noKey: return "No API key configured"
+        case .invalidResponse: return "Invalid response from server"
+        case .httpError(let code): return "HTTP \(code)"
+        case .unauthorized: return "Invalid or revoked API key. Update it in Settings."
+        }
+    }
 }
 
 private struct ImageRequestInputReferences: Codable {
