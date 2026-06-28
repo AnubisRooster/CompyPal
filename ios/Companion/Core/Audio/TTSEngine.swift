@@ -6,6 +6,7 @@ class TTSEngine: NSObject {
     private let synthesizer = AVSpeechSynthesizer()
     private var rangeCallback: ((NSRange) -> Void)?
     private var completion: (() -> Void)?
+    private var currentToken: UInt64 = 0
 
     @Published private(set) var isSpeaking = false
 
@@ -26,6 +27,8 @@ class TTSEngine: NSObject {
         utterance.rate = Float(rate)
         utterance.volume = 1.0
 
+        currentToken &+= 1
+        let myToken = currentToken
         isSpeaking = true
         synthesizer.speak(utterance)
 
@@ -53,12 +56,14 @@ class TTSEngine: NSObject {
             let energies = Self.computePCMEnergies(concatenated)
             let duration = TimeInterval(concatenated.frameLength) / concatenated.format.sampleRate
             await MainActor.run {
+                guard self.currentToken == myToken else { return }
                 capturedCallback?(energies, duration)
             }
         }
     }
 
     func stop() {
+        currentToken &+= 1
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
         completion = nil

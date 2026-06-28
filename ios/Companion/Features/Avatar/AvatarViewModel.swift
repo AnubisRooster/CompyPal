@@ -187,12 +187,25 @@ final class AvatarViewModel: ObservableObject {
     }
 
     private func tickLipSync() {
-        guard isSpeaking, !pcmEnergies.isEmpty, totalEstimatedDuration > 0 else { return }
-        let elapsed = CACurrentMediaTime() - speechStartTime
-        let sampleInterval = totalEstimatedDuration / TimeInterval(pcmEnergies.count)
-        let idx = Int(elapsed / sampleInterval)
-        guard idx >= 0, idx < pcmEnergies.count else { return }
-        let energy = pcmEnergies[idx]
+        guard isSpeaking else { return }
+
+        // Path A: real PCM data has arrived — time-based sampling
+        if !pcmEnergies.isEmpty, totalEstimatedDuration > 0 {
+            let elapsed = CACurrentMediaTime() - speechStartTime
+            let sampleInterval = totalEstimatedDuration / TimeInterval(pcmEnergies.count)
+            let idx = Int(elapsed / sampleInterval)
+            guard idx >= 0, idx < pcmEnergies.count else { return }
+            let energy = pcmEnergies[idx]
+            lipSyncSystem.enqueueEnergy(energy, timestamp: CACurrentMediaTime())
+            return
+        }
+
+        // Path B: synthesis hasn't completed yet — vowel-counting fallback
+        // gives visible mouth movement during the ~500ms pre-PCM window.
+        let snippet = performanceDirector.currentSpeechSnippet()
+        guard !snippet.isEmpty else { return }
+        let vowels = snippet.lowercased().filter { "aeiou".contains($0) }.count
+        let energy = min(Float(vowels) / Float(max(snippet.count, 1)) * 1.5, 1.0)
         lipSyncSystem.enqueueEnergy(energy, timestamp: CACurrentMediaTime())
     }
 

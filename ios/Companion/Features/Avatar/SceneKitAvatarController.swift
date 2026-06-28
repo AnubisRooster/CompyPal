@@ -35,8 +35,13 @@ final class SceneKitAvatarController: AvatarController {
     private var currentGaze: GazeTarget = .camera
     private var isIdleEnabled = true
     private var appearanceColorMap: [String: UIColor] = [:]
-    private var morpherIndex: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
-    var morpherIndexCount: Int { morpherIndex.count }
+    private var morpherIndex: [String: [(morpher: SCNMorpher, targetIndex: Int)]] = [:]
+    var morpherIndexCount: Int { morpherIndex.values.reduce(0) { $0 + $1.count } }
+    var morpherIndexUniqueNameCount: Int { morpherIndex.count }
+
+#if DEBUG
+    func morpherIndexContains(_ name: String) -> Bool { morpherIndex[name] != nil }
+#endif
 
     init() {
         scene = SCNScene()
@@ -298,12 +303,25 @@ final class SceneKitAvatarController: AvatarController {
         let gltfAsset = try GLTFAsset(url: url, options: [:])
         let source = GLTFSCNSceneSource(asset: gltfAsset)
         guard let glbScene = source.defaultScene else { throw AvatarError.glbLoadFailed }
-        guard let glbRoot = glbScene.rootNode.childNodes.first else {
+        let children = glbScene.rootNode.childNodes
+        guard !children.isEmpty else {
             avatarLog.error("GLTFKit2 produced no root nodes from \(url.lastPathComponent)")
             throw AvatarError.glbLoadFailed
         }
-        glbRootNode = glbRoot
-        rootNode.addChildNode(glbRoot)
+        // GLTFKit2 may put content as direct children of the scene root,
+        // or nest everything under a single container node. Handle both:
+        // if there's exactly one child, use it as the root; otherwise
+        // create a container to hold all children.
+        if children.count == 1, let single = children.first {
+            glbRootNode = single
+            rootNode.addChildNode(single)
+        } else {
+            let container = SCNNode()
+            container.name = "glb_container"
+            for child in children { container.addChildNode(child) }
+            glbRootNode = container
+            rootNode.addChildNode(container)
+        }
 
         headNode?.isHidden = true
         buildMorpherIndex()
@@ -350,8 +368,10 @@ final class SceneKitAvatarController: AvatarController {
     // MARK: - Morph targets
 
     func setMorphWeight(named name: String, weight: Float) {
-        if hasGLB, let entry = morpherIndex[name] {
-            entry.morpher.setWeight(CGFloat(weight), forTargetAt: entry.targetIndex)
+        if hasGLB, let entries = morpherIndex[name], !entries.isEmpty {
+            for entry in entries {
+                entry.morpher.setWeight(CGFloat(weight), forTargetAt: entry.targetIndex)
+            }
             return
         }
         for node in [headNode].compactMap({ $0 }) {
@@ -371,9 +391,9 @@ final class SceneKitAvatarController: AvatarController {
             guard let morpher = node.morpher else { return }
             for (i, target) in morpher.targets.enumerated() {
                 let key = target.name ?? "target_\(i)"
-                morpherIndex[key] = (morpher, i)
+                morpherIndex[key, default: []].append((morpher, i))
                 if let altName = rigMapping?.visemes.first(where: { $0.value == key })?.key {
-                    morpherIndex[altName] = (morpher, i)
+                    morpherIndex[altName, default: []].append((morpher, i))
                 }
             }
         }
@@ -448,18 +468,26 @@ final class SceneKitAvatarController: AvatarController {
             meshNamesList.append(names)
         }
 
-        // Walk SceneKit morphers in DFS order — same order as buildMorpherIndex.
-        // Pair each morpher with the next mesh in JSON order that has morph names.
+        // Walk SceneKit morphers, grouped by parent node.
+        // GLTFKit2 creates one SCNMorpher per primitive; all primitives of a glTF mesh
+        // share the same morph target structure (glTF 2.0 requirement §5.3.4).
+        // Group by parent so one mesh's names pair with all its primitives' morphers.
         guard let root = glbRootNode else { return }
-        var morpherList: [SCNMorpher] = []
+        var morphersByParent: [(parent: SCNNode?, morphers: [SCNMorpher])] = []
         root.enumerateChildNodes { node, _ in
-            if let morpher = node.morpher { morpherList.append(morpher) }
+            guard let morpher = node.morpher else { return }
+            let parent = node.parent
+            if let last = morphersByParent.last, last.parent === parent {
+                morphersByParent[morphersByParent.count - 1].morphers.append(morpher)
+            } else {
+                morphersByParent.append((parent, [morpher]))
+            }
         }
 
         var meshIdx = 0
-        var rebuilt: [String: (morpher: SCNMorpher, targetIndex: Int)] = [:]
+        var rebuilt: [String: [(morpher: SCNMorpher, targetIndex: Int)]] = [:]
         var recoveredCount = 0
-        for morpher in morpherList {
+        for group in morphersByParent {
             while meshIdx < meshNamesList.count, meshNamesList[meshIdx].isEmpty {
                 meshIdx += 1
             }
@@ -467,32 +495,34 @@ final class SceneKitAvatarController: AvatarController {
             let names = meshNamesList[meshIdx]
             meshIdx += 1
 
-            for (i, target) in morpher.targets.enumerated() {
-                guard i < names.count else { break }
-                let realName = names[i]
-                rebuilt[realName] = (morpher, i)
-                recoveredCount += 1
+            for morpher in group.morphers {
+                for (i, target) in morpher.targets.enumerated() {
+                    guard i < names.count else { break }
+                    let realName = names[i]
+                    rebuilt[realName, default: []].append((morpher, i))
+                    recoveredCount += 1
 
-                if let mapping = rigMapping {
-                    for (vocab, mapped) in mapping.visemes where mapped == realName {
-                        rebuilt[vocab] = (morpher, i)
+                    if let mapping = rigMapping {
+                        for (vocab, mapped) in mapping.visemes where mapped == realName {
+                            rebuilt[vocab, default: []].append((morpher, i))
+                        }
+                        if mapping.blink.left == realName { rebuilt["blink_left", default: []].append((morpher, i)) }
+                        if mapping.blink.right == realName { rebuilt["blink_right", default: []].append((morpher, i)) }
                     }
-                    if mapping.blink.left == realName { rebuilt["blink_left"] = (morpher, i) }
-                    if mapping.blink.right == realName { rebuilt["blink_right"] = (morpher, i) }
-                }
 
-                if let existingName = target.name, existingName != realName {
-                    rebuilt[existingName] = (morpher, i)
+                    if let existingName = target.name, existingName != realName {
+                        rebuilt[existingName, default: []].append((morpher, i))
+                    }
                 }
             }
         }
 
         if recoveredCount > 0 {
-            for (key, entry) in morpherIndex where !key.hasPrefix("target_") {
-                if rebuilt[key] == nil { rebuilt[key] = entry }
+            for (key, entries) in morpherIndex where !key.hasPrefix("target_") {
+                if rebuilt[key] == nil { rebuilt[key] = entries }
             }
             morpherIndex = rebuilt
-            avatarLog.info("Recovered \(recoveredCount) morph target names from GLB JSON; index size: \(self.morpherIndex.count)")
+            avatarLog.info("Recovered \(recoveredCount) morph target bindings; unique names: \(self.morpherIndexUniqueNameCount), total: \(self.morpherIndexCount)")
         } else {
             avatarLog.warning("No morph target names found in GLB JSON at any of the three spec-permitted locations")
         }

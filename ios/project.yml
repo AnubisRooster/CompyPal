@@ -62,3 +62,4 @@ targets:
       GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Companion
+      - package: GLTFKit2

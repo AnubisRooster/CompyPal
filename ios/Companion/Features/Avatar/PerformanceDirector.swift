@@ -12,6 +12,8 @@ final class PerformanceDirector {
     private var currentTrack: PerformanceTrack?
     private var isPerforming = false
     private var pendingBeats: [(at: Int, emotion: Emotion?, gesture: Gesture?, gaze: GazeTarget?)] = []
+    private var currentRange: NSRange?
+    private var currentText: String?
 
     init(
         emotionSystem: EmotionSystem,
@@ -62,6 +64,8 @@ final class PerformanceDirector {
     }
 
     func updateSpeechRange(characterRange: NSRange, text: String) {
+        currentRange = characterRange
+        currentText = text
         guard isPerforming else { return }
 
         // Fire all not-yet-fired beats whose offset has been reached
@@ -82,6 +86,12 @@ final class PerformanceDirector {
             }
         }
         pendingBeats.removeAll { $0.at <= location }
+    }
+
+    func currentSpeechSnippet() -> String {
+        guard let range = currentRange, let speechText = currentText,
+              let swiftRange = Range(range, in: speechText) else { return "" }
+        return String(speechText[swiftRange])
     }
 
     func endPerformance() {
