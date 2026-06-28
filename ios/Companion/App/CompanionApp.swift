@@ -1,21 +1,40 @@
 import SwiftUI
+import OSLog
+
+private let appLog = Logger(subsystem: "ai.companion", category: "app")
 
 @main
 struct CompanionApp: App {
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var catalogChecker = CatalogRefreshChecker()
+    @State private var seedTask: Task<Void, Never>?
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .task {
                     await catalogChecker.refreshIfStale()
+                    await seedCompanionsAtLaunch()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     Task {
                         await catalogChecker.refreshIfStale()
                     }
                 }
+        }
+    }
+
+    private func seedCompanionsAtLaunch() async {
+        let store = MemoryStore()
+        guard let userId = try? await store.ensureUser() else {
+            appLog.warning("Could not ensure user for seed companions")
+            return
+        }
+        do {
+            try await store.ensureSeedCompanions(userId: userId)
+            appLog.info("Seed companions check complete for userId=\(userId)")
+        } catch {
+            appLog.error("Seed companions failed: \(error.localizedDescription)")
         }
     }
 }

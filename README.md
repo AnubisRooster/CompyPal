@@ -23,13 +23,14 @@
 | **Fallback Rotation** | ✅ | 429/5xx → auto-retry next candidate |
 | **3D Parametric Avatar** | ✅ | SceneKit, morph targets, material swaps |
 | **Lip Sync** | ✅ | PCM-sample-driven viseme timing |
-| **Facial Expressions** | ✅ | Blend-shape presets |
+| **Facial Expressions** | ✅ | Emotion-driven blend shape presets |
+| **Appearance Mutation** | ✅ | In-chat intent parsing → validated deltas → live mesh update |
+| **Identity-Reference Image** | 🚧 | Phase 3.5 (gated, requires image-capable model) |
 | **TTS** | ✅ | AVSpeechSynthesizer, per-companion voice/pitch/rate |
-| **STT** | 🚧 | Apple Speech framework scaffolded |
-| **Identity-Reference Image** | 🚧 | Phase 3.5 (gated) |
+| **STT** | ✅ | Apple Speech framework (on-device), whisper.cpp optional |
 | **Settings** | ✅ | BYOK key entry, connection test, model override |
 | **Network Monitor** | ✅ | Connectivity-aware UI states |
-| **Test Coverage** | 59 tests | 5 suites across avatar, audio, persona, selection, catalog |
+| **Test Coverage** | 60 tests | 6 suites across avatar, integration, persona, selection, catalog |
 
 ## Architecture
 
@@ -139,10 +140,10 @@ The project follows a phased build plan defined in `docs/SPEC.md`:
 |-------|--------|-------------|
 | **0 — Scaffold & Catalog** | ✅ Complete | Keychain, catalog fetch/cache, selection policy, test connection |
 | **1 — Text Companion** | ✅ Complete | Chat, memory extraction/injection, persona assembly, relationship stages |
-| **2 — Voice & Avatar** | ✅ Mostly Complete | 3D avatar, lip sync, expressions, TTS, STT scaffolded |
-| **3 — Appearance Mutation** | 🚧 Next | In-chat appearance changes via structured deltas |
-| **3.5 — Identity-Reference Image** | 🔜 Planned | Optional reference image generation (gated) |
-| **4 — Polish** | 🔜 Planned | Latency optimization, offline states, accessibility |
+| **2 — Voice & Avatar** | ✅ Complete | 3D avatar, lip sync, expressions, TTS, STT, voice interaction |
+| **3 — Appearance Mutation** | ✅ Complete | In-chat appearance changes via structured deltas |
+| **3.5 — Identity-Reference Image** | 🚧 Gated | Optional reference image generation (feature-flagged) |
+| **4 — Polish** | 🔜 Next | Latency optimization, offline states, accessibility, SSE reconnection |
 
 ## Code Conventions
 

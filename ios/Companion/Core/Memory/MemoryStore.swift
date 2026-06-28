@@ -1,6 +1,9 @@
 import Foundation
 import AVFoundation
 import GRDB
+import OSLog
+
+private let memoryLog = Logger(subsystem: "ai.companion", category: "memory")
 
 final class MemoryStore: @unchecked Sendable {
     private let db: DatabaseManager
@@ -29,6 +32,7 @@ final class MemoryStore: @unchecked Sendable {
         let count = try await queue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM companion WHERE user_id = ?", arguments: [userId]) ?? 0
         }
+        memoryLog.info("ensureSeedCompanions: existing count = \(count) for userId=\(userId)")
         guard count == 0 else { return }
 
         try await createCompanion(
@@ -79,7 +83,7 @@ final class MemoryStore: @unchecked Sendable {
             let rows = try Row.fetchAll(db, sql: """
                 SELECT c.id, c.name, c.relationship_stage, c.turn_count, c.created_at, c.glb_asset
                 FROM companion c WHERE c.user_id = ?
-                ORDER BY c.created_at DESC
+                ORDER BY c.created_at DESC, c.id DESC
             """, arguments: [userId])
             return try rows.map { row in
                 let id: Int64 = row["id"]

@@ -29,6 +29,7 @@ actor DatabaseManager {
                 t.column("name", .text).notNull()
                 t.column("relationship_stage", .text).notNull().defaults(to: "acquaintance")
                 t.column("turn_count", .integer).notNull().defaults(to: 0)
+                // Use explicit Date() in INSERTs — CURRENT_TIMESTAMP's space-format breaks GRDB's ISO-8601 Date decoder
                 t.column("created_at", .datetime).notNull()
             }
             try db.create(table: "personality_trait") { t in
@@ -58,6 +59,7 @@ actor DatabaseManager {
                 t.column("kind", .text).notNull()
                 t.column("salience", .double).notNull().defaults(to: 0.5)
                 t.column("source_turn_id", .integer).references("conversation_turn", onDelete: .setNull)
+                // Use explicit Date() in INSERTs, not CURRENT_TIMESTAMP (space-format breaks GRDB's ISO-8601 decoder)
                 t.column("created_at", .datetime).notNull()
             }
             try db.create(table: "conversation_turn") { t in
@@ -65,6 +67,7 @@ actor DatabaseManager {
                 t.column("companion_id", .integer).notNull().references("companion", onDelete: .cascade)
                 t.column("role", .text).notNull()
                 t.column("text", .text).notNull()
+                // Use explicit Date() in INSERTs, not CURRENT_TIMESTAMP (space-format breaks GRDB's ISO-8601 decoder)
                 t.column("created_at", .datetime).notNull()
             }
         }

@@ -41,6 +41,7 @@ final class SceneKitAvatarController: AvatarController {
 
 #if DEBUG
     func morpherIndexContains(_ name: String) -> Bool { morpherIndex[name] != nil }
+    func morpherEntriesCount(for name: String) -> Int { morpherIndex[name]?.count ?? 0 }
 #endif
 
     init() {
@@ -318,7 +319,7 @@ final class SceneKitAvatarController: AvatarController {
         } else {
             let container = SCNNode()
             container.name = "glb_container"
-            for child in children { container.addChildNode(child) }
+            for child in Array(children) { container.addChildNode(child) }
             glbRootNode = container
             rootNode.addChildNode(container)
         }
@@ -387,10 +388,13 @@ final class SceneKitAvatarController: AvatarController {
     private func buildMorpherIndex() {
         morpherIndex.removeAll(keepingCapacity: true)
         guard let root = glbRootNode else { return }
+        var seen: Set<String> = []
         root.enumerateChildNodes { node, _ in
             guard let morpher = node.morpher else { return }
             for (i, target) in morpher.targets.enumerated() {
                 let key = target.name ?? "target_\(i)"
+                let dedupKey = "\(Unmanaged.passUnretained(morpher).toOpaque()):\(i)"
+                guard seen.insert(dedupKey).inserted else { continue }
                 morpherIndex[key, default: []].append((morpher, i))
                 if let altName = rigMapping?.visemes.first(where: { $0.value == key })?.key {
                     morpherIndex[altName, default: []].append((morpher, i))
@@ -486,6 +490,7 @@ final class SceneKitAvatarController: AvatarController {
 
         var meshIdx = 0
         var rebuilt: [String: [(morpher: SCNMorpher, targetIndex: Int)]] = [:]
+        var rebuiltSeen: Set<String> = []
         var recoveredCount = 0
         for group in morphersByParent {
             while meshIdx < meshNamesList.count, meshNamesList[meshIdx].isEmpty {
@@ -498,6 +503,8 @@ final class SceneKitAvatarController: AvatarController {
             for morpher in group.morphers {
                 for (i, target) in morpher.targets.enumerated() {
                     guard i < names.count else { break }
+                    let dedupKey = "\(Unmanaged.passUnretained(morpher).toOpaque()):\(i)"
+                    guard rebuiltSeen.insert(dedupKey).inserted else { continue }
                     let realName = names[i]
                     rebuilt[realName, default: []].append((morpher, i))
                     recoveredCount += 1
