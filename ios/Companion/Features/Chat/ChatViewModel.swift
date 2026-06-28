@@ -8,14 +8,13 @@ class ChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isSpeaking = false
     @Published var isListening = false
-    @Published var mouthOpen: Float = 0
-    @Published var currentEmotion = "neutral"
-    @Published var referenceImageData: Data?
     @Published var hasApiKey = false
     @Published var isOffline = false
 
     var companion: CompanionInfo
     @Published var appearanceVersion = 0
+
+    let avatarViewModel = AvatarViewModel()
 
     private let store = MemoryStore()
     let client = OpenRouterClient()
@@ -55,8 +54,15 @@ class ChatViewModel: ObservableObject {
         messages = recent.map { ChatMessage(role: $0.role, text: $0.text) }
         await loadApiKey()
         await loadChatCandidates()
-        referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
         isOffline = !NetworkMonitor.shared.isConnected
+
+        avatarViewModel.applyAppearance(companion.appearance)
+        avatarViewModel.setPersonalityTraits(companion.traits)
+        let stage = (try? await store.relationshipStage(companionId: companion.id)) ?? "acquaintance"
+        avatarViewModel.setStage(stage)
+        if let imgData = await imageGenService.cachedImageData(companionId: companion.id) {
+            avatarViewModel.applyReferenceImage(imgData)
+        }
     }
 
     func sendText(_ text: String) async {
@@ -78,6 +84,7 @@ class ChatViewModel: ObservableObject {
         let turnId = (try? await store.insertTurn(companionId: companion.id, role: "user", text: trimmed)) ?? 0
 
         isStreaming = true
+        avatarViewModel.setThinking(true)
         messages.append(ChatMessage(role: "assistant", text: ""))
         let msgIndex = messages.count - 1
 
@@ -115,6 +122,7 @@ class ChatViewModel: ObservableObject {
             }
 
             isStreaming = false
+            avatarViewModel.setThinking(false)
 
             guard !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
                 if chatCandidates.isEmpty {
@@ -138,6 +146,7 @@ class ChatViewModel: ObservableObject {
             if hasAppearanceIntent(text: trimmed) {
                 await handleAppearanceIntent(userText: trimmed, catalog: catalog)
             }
+            avatarViewModel.beginSpeaking(text: fullReply, track: nil)
             speakReply(fullReply)
         }
     }
@@ -158,6 +167,7 @@ class ChatViewModel: ObservableObject {
             let granted = await audioRecorder.requestPermission()
             guard granted else { return }
             isListening = true
+            avatarViewModel.setListening(true)
             audioRecorder.startRecording { [weak self] transcript in
                 Task { @MainActor in
                     self?.pendingTranscript = transcript
@@ -169,6 +179,7 @@ class ChatViewModel: ObservableObject {
     private func stopListening() {
         audioRecorder.stopRecording()
         isListening = false
+        avatarViewModel.setListening(false)
         if !pendingTranscript.trimmingCharacters(in: .whitespaces).isEmpty {
             let text = pendingTranscript
             pendingTranscript = ""
@@ -188,7 +199,7 @@ class ChatViewModel: ObservableObject {
             rate: 0.5
         ) { [weak self] mouthValue in
             Task { @MainActor in
-                self?.mouthOpen = mouthValue
+                self?.avatarViewModel.onSpeechProgress(mouthOpen: mouthValue)
             }
         }
         isSpeaking = true
@@ -198,7 +209,7 @@ class ChatViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             isSpeaking = false
-            mouthOpen = 0
+            avatarViewModel.endSpeaking()
         }
     }
 
@@ -209,7 +220,7 @@ class ChatViewModel: ObservableObject {
     func stopSpeaking() {
         ttsEngine.stop()
         isSpeaking = false
-        mouthOpen = 0
+        avatarViewModel.endSpeaking()
     }
 
     private func hasAppearanceIntent(text: String) -> Bool {
@@ -229,10 +240,12 @@ class ChatViewModel: ObservableObject {
         if let value = result.value, result.declined != true {
             let updated = try? await store.companion(id: companion.id)
             companion = updated ?? companion
+            avatarViewModel.applyAppearance(companion.appearance)
             appearanceVersion += 1
 
             let confirmMsg = ChatMessage(role: "assistant", text: "Got it! Changing \(result.attribute) to \(value).")
             messages.append(confirmMsg)
+            avatarViewModel.beginSpeaking(text: confirmMsg.text, track: nil)
             speakReply(confirmMsg.text)
         } else if let suggestion = result.suggestion {
             let imageGenOn = UserDefaults.standard.bool(forKey: "image_gen_enabled")
@@ -245,14 +258,18 @@ class ChatViewModel: ObservableObject {
                 if let _ = try? await imageGenService.generateForCompanion(
                     companionId: companion.id, prompt: prompt, catalog: catalog, referenceData: existingData
                 ) {
-                    referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
+                    if let newImg = await imageGenService.cachedImageData(companionId: companion.id) {
+                        avatarViewModel.applyReferenceImage(newImg)
+                    }
                     let doneMsg = ChatMessage(role: "assistant", text: "Reference image generated and applied to your companion.")
                     messages.append(doneMsg)
+                    avatarViewModel.applyAppearance(companion.appearance)
                     appearanceVersion += 1
                 }
             } else {
                 let declineMsg = ChatMessage(role: "assistant", text: suggestion)
                 messages.append(declineMsg)
+                avatarViewModel.beginSpeaking(text: declineMsg.text, track: nil)
                 speakReply(declineMsg.text)
             }
         }
@@ -291,6 +308,8 @@ class ChatViewModel: ObservableObject {
         for (stage, threshold) in stageThresholds {
             if currentStage == stage, liveTurnCount >= threshold {
                 try? await store.promoteStage(companionId: companion.id)
+                let newStage = (try? await store.relationshipStage(companionId: companion.id)) ?? stage
+                avatarViewModel.setStage(newStage)
             }
         }
     }

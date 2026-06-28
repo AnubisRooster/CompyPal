@@ -38,10 +38,6 @@ struct ChatView: View {
             }
         }
         .task { await viewModel.load() }
-        .onChange(of: viewModel.appearanceVersion) { _ in
-            viewModel.referenceImageData = nil
-            Task { viewModel.referenceImageData = await viewModel.cachedImageData(companionId: viewModel.companion.id) }
-        }
     }
 
     @ViewBuilder
@@ -59,13 +55,8 @@ struct ChatView: View {
     }
 
     private var companionHeader: some View {
-        AvatarView(
-            emotion: viewModel.currentEmotion,
-            mouthOpen: viewModel.mouthOpen,
-            appearance: viewModel.companion.appearance,
-            referenceImageData: viewModel.referenceImageData
-        )
-        .frame(height: 220)
+        CompanionAvatarView(viewModel: viewModel.avatarViewModel)
+            .frame(height: 220)
     }
 
     private var scrollView: some View {
