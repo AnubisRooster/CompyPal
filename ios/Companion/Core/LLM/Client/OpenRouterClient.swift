@@ -9,7 +9,8 @@ actor OpenRouterClient {
 
     init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 300
         self.session = URLSession(configuration: config)
         self.decoder = JSONDecoder()
     }
@@ -29,6 +30,7 @@ actor OpenRouterClient {
                     req.httpBody = try JSONEncoder().encode(body)
 
                     let (bytes, response) = try await session.bytes(for: req)
+                    guard Task.isCancelled == false else { continuation.finish(throwing: CancellationError()); return }
                     guard let http = response as? HTTPURLResponse else {
                         continuation.finish(throwing: ClientError.invalidResponse)
                         return
@@ -38,22 +40,43 @@ actor OpenRouterClient {
                         return
                     }
 
-                    for try await line in bytes.lines {
-                        guard line.hasPrefix("data: ") else { continue }
-                        let json = String(line.dropFirst(6))
-                        if json == "[DONE]" { break }
-                        guard let data = json.data(using: .utf8),
-                              let chunk = try? decoder.decode(ChatChunk.self, from: data),
-                              let delta = chunk.choices?.first?.delta.content
-                        else { continue }
-                        continuation.yield(delta)
+                    try await withRetry(maxAttempts: 3, delay: 1.0) {
+                        var lastYield: Date?
+                        for try await line in bytes.lines {
+                            try Task.checkCancellation()
+                            guard line.hasPrefix("data: ") else { continue }
+                            let json = String(line.dropFirst(6))
+                            if json == "[DONE]" { return }
+                            guard let data = json.data(using: .utf8),
+                                  let chunk = try? decoder.decode(ChatChunk.self, from: data),
+                                  let delta = chunk.choices?.first?.delta.content
+                            else { continue }
+                            continuation.yield(delta)
+                            lastYield = Date()
+                        }
                     }
                     continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish(throwing: CancellationError())
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
         }
+    }
+
+    private func withRetry(maxAttempts: Int, delay: TimeInterval, operation: () async throws -> Void) async rethrows {
+        var attempts = 0
+        repeat {
+            attempts += 1
+            do {
+                try await operation()
+                return
+            } catch {
+                guard attempts < maxAttempts, !(error is CancellationError) else { throw error }
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+        } while true
     }
 
     func completeChat(model: String, messages: [Message]) async throws -> String {

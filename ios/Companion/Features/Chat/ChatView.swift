@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @State private var inputText = ""
+    @FocusState private var isFocused: Bool
 
     init(companion: CompanionInfo) {
         _viewModel = StateObject(wrappedValue: ChatViewModel(companion: companion))
@@ -10,118 +11,147 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            avatarSection
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.messages) { msg in
-                            MessageBubble(message: msg)
-                                .id(msg.id)
-                        }
-                        if let error = viewModel.errorMessage {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .padding()
-                        }
-                    }
-                    .padding()
-                }
-                .onChange(of: viewModel.messages.count) { _, _ in
-                    if let last = viewModel.messages.last {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
-            }
-
+            offlineBanner
+            companionHeader
+            scrollView
             inputBar
         }
         .navigationTitle(viewModel.companion.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if viewModel.isSpeaking {
-                Button("Stop", systemImage: "speaker.wave.2.fill") {
-                    viewModel.stopSpeaking()
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 4) {
+                    Button(action: { viewModel.stopSpeaking() }) {
+                        Image(systemName: "speaker.slash")
+                            .accessibilityLabel("Stop speaking")
+                    }
+                    .disabled(!viewModel.isSpeaking)
+                    .opacity(viewModel.isSpeaking ? 1 : 0.3)
+
+                    Button(action: { viewModel.cancelStream() }) {
+                        Image(systemName: "stop.circle")
+                            .accessibilityLabel("Cancel response")
+                    }
+                    .disabled(!viewModel.isStreaming)
+                    .opacity(viewModel.isStreaming ? 1 : 0.3)
                 }
             }
         }
         .task { await viewModel.load() }
+        .onChange(of: viewModel.appearanceVersion) { _ in
+            viewModel.referenceImageData = nil
+            Task { viewModel.referenceImageData = await viewModel.cachedImageData(companionId: viewModel.companion.id) }
+        }
     }
 
-    private var avatarSection: some View {
-        AvatarView(emotion: viewModel.currentEmotion, mouthOpen: viewModel.mouthOpen, appearance: viewModel.companion.appearance, referenceImageData: viewModel.referenceImageData)
-            .id(viewModel.appearanceVersion)
-            .frame(height: 200)
-            .overlay(alignment: .topTrailing) {
-                if viewModel.isSpeaking {
-                    Label("Speaking", systemImage: "waveform")
-                        .font(.caption)
-                        .padding(6)
-                        .background(.ultraThinMaterial)
-                        .clipShape(.rect(cornerRadius: 8))
-                        .padding(8)
-                }
+    @ViewBuilder
+    private var offlineBanner: some View {
+        if viewModel.isOffline {
+            HStack {
+                Image(systemName: "wifi.slash")
+                Text("You're offline. Chat requires an internet connection.")
+                    .font(.caption)
             }
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(Color.orange.opacity(0.2))
+        }
+    }
+
+    private var companionHeader: some View {
+        AvatarView(
+            emotion: viewModel.currentEmotion,
+            mouthOpen: viewModel.mouthOpen,
+            appearance: viewModel.companion.appearance,
+            referenceImageData: viewModel.referenceImageData
+        )
+        .frame(height: 220)
+    }
+
+    private var scrollView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(viewModel.messages) { msg in
+                        MessageBubble(message: msg, isStreaming: viewModel.isStreaming && msg.id == viewModel.messages.last?.id)
+                    }
+                    if viewModel.isStreaming {
+                        HStack {
+                            DotLoader()
+                                .padding(.leading)
+                            Spacer()
+                        }
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+            }
+            .onChange(of: viewModel.messages.count) { _ in
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+        }
     }
 
     private var inputBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button(action: { viewModel.toggleVoiceInput() }) {
-                Image(systemName: viewModel.isListening ? "waveform" : "mic")
-                    .font(.title2)
-                    .foregroundStyle(viewModel.isListening ? .red : .primary)
+                Image(systemName: viewModel.isListening ? "mic.fill" : "mic")
+                    .foregroundColor(viewModel.isListening ? .red : .primary)
+                    .accessibilityLabel(viewModel.isListening ? "Stop recording" : "Start recording")
             }
-            .disabled(viewModel.isStreaming)
 
-            TextField("Message...", text: $inputText)
+            TextField("Type a message...", text: $inputText)
                 .textFieldStyle(.roundedBorder)
-                .disabled(viewModel.isStreaming || viewModel.isListening)
+                .focused($isFocused)
+                .disabled(viewModel.isListening)
 
-            if viewModel.isListening {
-                Text(viewModel.messages.last?.text ?? "")
-                    .lineLimit(1)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if viewModel.isStreaming {
+                Button("Cancel") { viewModel.cancelStream() }
+                    .buttonStyle(.bordered)
+            } else {
+                Button("Send") {
+                    let text = inputText
+                    inputText = ""
+                    isFocused = false
+                    Task { await viewModel.sendText(text) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isOffline || !viewModel.hasApiKey)
             }
-
-            Button("Send") {
-                let text = inputText
-                inputText = ""
-                Task { await viewModel.sendText(text) }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isStreaming)
         }
         .padding()
-        .background(.bar)
     }
 }
 
 struct MessageBubble: View {
     let message: ChatMessage
+    var isStreaming: Bool = false
 
     var body: some View {
         HStack {
-            if message.role == "user" {
-                Spacer()
-                Text(message.text)
-                    .padding(12)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(.rect(cornerRadius: 16, style: .continuous))
-            } else if message.role == "assistant" {
-                Text(message.text)
-                    .padding(12)
-                    .background(.gray.opacity(0.15))
-                    .clipShape(.rect(cornerRadius: 16, style: .continuous))
-                Spacer()
-            } else {
-                Text(message.text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
+            if message.role == "user" { Spacer(minLength: 60) }
+            Text(message.text)
+                .padding(12)
+                .foregroundColor(message.role == "user" ? .white : .primary)
+                .background(message.role == "user" ? Color.blue : Color(.systemGray5))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .accessibilityLabel("\(message.role == "user" ? "You" : "Companion"): \(message.text)")
+            if message.role == "assistant" { Spacer(minLength: 60) }
+        }
+    }
+}
+
+struct DotLoader: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3) { i in
+                Circle()
+                    .frame(width: 8, height: 8)
+                    .foregroundColor(.gray)
+                    .opacity(0.5)
             }
         }
     }
 }
+

@@ -162,6 +162,19 @@ final class MemoryStore: @unchecked Sendable {
         }
     }
 
+    func clearAll() async throws {
+        let queue = try await db.open()
+        try await queue.write { db in
+            try db.execute(sql: "DELETE FROM memory")
+            try db.execute(sql: "DELETE FROM conversation_turn")
+            try db.execute(sql: "DELETE FROM personality_trait")
+            try db.execute(sql: "DELETE FROM appearance_attribute")
+            try db.execute(sql: "DELETE FROM voice")
+            try db.execute(sql: "DELETE FROM companion")
+            try db.execute(sql: "DELETE FROM \"user\"")
+        }
+    }
+
     func promoteStage(companionId: Int64) async throws {
         let queue = try await db.open()
         try await queue.write { db in
@@ -188,7 +201,7 @@ private func appearanceAttributes(companionId: Int64, db: GRDB.Database) throws 
     return rows.map { ($0["key"], $0["value"]) }
 }
 
-struct CompanionInfo {
+struct CompanionInfo: Identifiable, Hashable {
     let id: Int64
     let name: String
     let relationshipStage: String
@@ -196,6 +209,16 @@ struct CompanionInfo {
     let createdAt: Date
     let traits: [(String, Double)]
     let appearance: [(String, String)]
+
+    var level: Int { min(turnCount / 5 + 1, 50) }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: CompanionInfo, rhs: CompanionInfo) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 struct MemoryInfo {

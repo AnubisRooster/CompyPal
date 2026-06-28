@@ -10,12 +10,14 @@ class ChatViewModel: ObservableObject {
     @Published var mouthOpen: Float = 0
     @Published var currentEmotion = "neutral"
     @Published var referenceImageData: Data?
+    @Published var hasApiKey = false
+    @Published var isOffline = false
 
     var companion: CompanionInfo
     @Published var appearanceVersion = 0
 
     private let store = MemoryStore()
-    private let client = OpenRouterClient()
+    let client = OpenRouterClient()
     private let extractor: MemoryExtractor
     private let keychain = KeychainService()
     private let catalogCache = CatalogCache()
@@ -28,6 +30,7 @@ class ChatViewModel: ObservableObject {
     private var userId: Int64 = 1
     private var chatCandidates: [CatalogEntry] = []
     private var pendingTranscript = ""
+    private var streamTask: Task<Void, Never>?
 
     init(companion: CompanionInfo) {
         self.companion = companion
@@ -43,10 +46,22 @@ class ChatViewModel: ObservableObject {
         await loadApiKey()
         await loadChatCandidates()
         referenceImageData = await imageGenService.cachedImageData(companionId: companion.id)
+        isOffline = !NetworkMonitor.shared.isConnected
     }
 
     func sendText(_ text: String) async {
         guard !isStreaming, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+
+        if isOffline {
+            errorMessage = "You're offline. Chat requires an internet connection."
+            return
+        }
+        if !hasApiKey {
+            errorMessage = "Add an API key in Settings to start chatting."
+            return
+        }
+
+        cancelStream()
         errorMessage = nil
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         messages.append(ChatMessage(role: "user", text: trimmed))
@@ -66,49 +81,64 @@ class ChatViewModel: ObservableObject {
             stage: stage
         )
 
-        var fullReply = ""
-        var succeeded = false
+        streamTask = Task {
+            var fullReply = ""
+            var succeeded = false
 
-        for candidate in chatCandidates {
-            guard isStreaming else { break }
-            do {
-                let chatMessages = buildChatMessages(system: systemPrompt, history: messages, newUserText: trimmed)
-                var streamed = ""
-                for try await delta in await client.streamChat(model: candidate.id, messages: chatMessages) {
-                    streamed += delta
-                    fullReply += delta
-                    messages[msgIndex].text = streamed
+            for candidate in chatCandidates {
+                guard isStreaming else { break }
+                do {
+                    let chatMessages = buildChatMessages(system: systemPrompt, history: messages, newUserText: trimmed)
+                    var streamed = ""
+                    let start = CFAbsoluteTimeGetCurrent()
+                    for try await delta in await client.streamChat(model: candidate.id, messages: chatMessages) {
+                        try Task.checkCancellation()
+                        streamed += delta
+                        fullReply += delta
+                        messages[msgIndex].text = streamed
+                        if CFAbsoluteTimeGetCurrent() - start < 0.1 {
+                            try await Task.sleep(nanoseconds: 10_000_000)
+                        }
+                    }
+                    succeeded = true
+                    break
+                } catch is CancellationError {
+                    return
+                } catch {
+                    errorMessage = "\(candidate.id) failed: \(error.localizedDescription)"
+                    try? await catalogCache.clear()
+                    continue
                 }
-                succeeded = true
-                break
-            } catch {
-                errorMessage = "\(candidate.id) failed: \(error.localizedDescription)"
-                try? await catalogCache.clear()
-                continue
             }
-        }
 
+            isStreaming = false
+
+            guard succeeded, !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
+                if !succeeded {
+                    messages[msgIndex].text = "⚠️ All models failed. Check your API key or try refreshing the model catalog."
+                }
+                return
+            }
+
+            _ = (try? await store.insertTurn(companionId: companion.id, role: "assistant", text: fullReply)) ?? 0
+
+            let catalog = (await catalogCache.load())?.entries ?? []
+            Task {
+                try? await extractor.extractAndStore(
+                    userId: userId, companionId: companion.id, turnId: turnId,
+                    userText: trimmed, assistantText: fullReply, catalog: catalog
+                )
+            }
+            await checkStagePromotion()
+            await handleAppearanceIntent(userText: trimmed, catalog: catalog)
+            speakReply(fullReply)
+        }
+    }
+
+    func cancelStream() {
+        streamTask?.cancel()
+        streamTask = nil
         isStreaming = false
-
-        guard succeeded, !fullReply.trimmingCharacters(in: .whitespaces).isEmpty else {
-            if !succeeded {
-                messages[msgIndex].text = "⚠️ All models failed. Check your API key or try refreshing the model catalog."
-            }
-            return
-        }
-
-        let assistantTurnId = (try? await store.insertTurn(companionId: companion.id, role: "assistant", text: fullReply)) ?? 0
-
-        let catalog = (await catalogCache.load())?.entries ?? []
-        Task {
-            try? await extractor.extractAndStore(
-                userId: userId, companionId: companion.id, turnId: turnId,
-                userText: trimmed, assistantText: fullReply, catalog: catalog
-            )
-        }
-        await checkStagePromotion()
-        await handleAppearanceIntent(userText: trimmed, catalog: catalog)
-        speakReply(fullReply)
     }
 
     func toggleVoiceInput() {
@@ -161,6 +191,10 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    func cachedImageData(companionId: Int64) async -> Data? {
+        await imageGenService.cachedImageData(companionId: companionId)
+    }
+
     func stopSpeaking() {
         ttsEngine.stop()
         isSpeaking = false
@@ -208,6 +242,9 @@ class ChatViewModel: ObservableObject {
     private func loadApiKey() async {
         if let key = await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty {
             await client.setKey(key)
+            hasApiKey = true
+        } else {
+            hasApiKey = false
         }
     }
 

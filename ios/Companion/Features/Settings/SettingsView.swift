@@ -1,109 +1,151 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @StateObject private var viewModel = SettingsViewModel()
-    @State private var showConfirmation = false
-    @State private var savedKey = false
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var apiKey = ""
+    @State private var savedKey: String?
+    @State private var statusMessage: String?
+    @State private var showAlert = false
+    @State private var isFirstLaunch = false
+
+    @AppStorage("image_gen_enabled") private var imageGenEnabled = false
+    @AppStorage("tts_rate") private var ttsRate: Double = 0.5
+    @AppStorage("has_onboarded") private var hasOnboarded = false
+
+    private let keychain = KeychainService()
 
     var body: some View {
-        Form {
-            Section("OpenRouter API Key") {
-                SecureField("Enter your API key", text: $viewModel.apiKey)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
+        NavigationStack {
+            Form {
+                Section("OpenRouter API Key") {
+                    SecureField("sk-or-v1-...", text: $apiKey)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+                        .onAppear { loadKey() }
 
-                if savedKey {
-                    Text("Key saved to Keychain")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-
-                Button("Save to Keychain") {
-                    Task { await viewModel.saveKey(); savedKey = true }
-                }
-                .disabled(viewModel.apiKey.isEmpty)
-            }
-
-            Section("Connection") {
-                switch viewModel.connectionStatus {
-                case .idle:
-                    Button("Test Connection") {
-                        Task { await viewModel.testConnection() }
+                    if let saved = savedKey, !saved.isEmpty {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Key is configured")
+                                .foregroundColor(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
-                case .testing:
-                    HStack { ProgressView(); Text("Testing...") }
-                case .success(let reply):
-                    Label("OK: \(reply)", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                case .failed(let msg):
-                    Label(msg, systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                }
-            }
 
-            Section("Model Catalog") {
-                switch viewModel.catalogStatus {
-                case .unknown:
-                    Button("Fetch Models") {
-                        Task { await viewModel.refreshCatalog() }
+                    Button("Save Key") {
+                        saveKey()
                     }
-                case .cached(let date):
-                    Label("Cached: \(date.formatted())", systemImage: "clock")
-                    Button("Refresh") {
-                        Task { await viewModel.refreshCatalog() }
-                    }
-                case .refreshing:
-                    HStack { ProgressView(); Text("Refreshing...") }
-                case .fetched(let count):
-                    Label("\(count) models", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                case .failed(let msg):
-                    Label(msg, systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                    Button("Retry") {
-                        Task { await viewModel.refreshCatalog() }
+                    .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    if let msg = statusMessage {
+                        Text(msg)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
 
-                Button("Refresh Models") {
-                    Task { await viewModel.refreshCatalog() }
+                Section("TTS Speed") {
+                    Slider(value: $ttsRate, in: 0.25...1.0, step: 0.05) {
+                        Text("Speech Rate")
+                    } minimumValueLabel: {
+                        Text("Slow").font(.caption)
+                    } maximumValueLabel: {
+                        Text("Fast").font(.caption)
+                    }
                 }
-            }
 
-            Section("Model Selection") {
-                Picker("Chat Model", selection: $viewModel.chatMode) {
-                    ForEach(SettingsViewModel.ModelMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+                Section("Image Generation") {
+                    Toggle("Enable Image Generation", isOn: $imageGenEnabled)
+                }
+
+                Section("Memory") {
+                    Button("Clear All Memories", role: .destructive) {
+                        showAlert = true
+                    }
+                }
+
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text("1.0.0")
+                            .foregroundColor(.secondary)
                     }
                 }
             }
-
-            Section("Experimental") {
-                Toggle("Image Generation", isOn: $viewModel.imageGenEnabled)
-                Text("When enabled, the companion can generate a reference image for appearance changes outside the parametric space. Uses a paid image model. Disabled by default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .navigationTitle("Settings")
+            .alert("Clear Memory", isPresented: $showAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear", role: .destructive) {
+                    Task {
+                        let store = MemoryStore()
+                        try? await store.clearAll()
+                    }
+                }
+            } message: {
+                Text("This will delete all companion memories and conversation history. This cannot be undone.")
             }
-
-            Section("Danger Zone") {
-                Button("Delete API Key", role: .destructive) {
-                    showConfirmation = true
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
         }
-        .navigationTitle("Settings")
-        .confirmationDialog("Delete API Key?", isPresented: $showConfirmation) {
-            Button("Delete", role: .destructive) {
-                Task { await viewModel.deleteKey() }
+        .onAppear {
+            if !hasOnboarded {
+                isFirstLaunch = true
+                hasOnboarded = true
             }
         }
-        .task {
-            await viewModel.loadKey()
-            await viewModel.loadCatalogStatus()
+        .sheet(isPresented: $isFirstLaunch) {
+            OnboardingView()
+        }
+    }
+
+    private func loadKey() {
+        let key = keychain.read(key: KeychainService.apiKeyAccount)
+        if let key, !key.isEmpty {
+            savedKey = key
+            apiKey = key
+            statusMessage = "Key loaded from secure storage."
+        }
+    }
+
+    private func saveKey() {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("sk-or-"), trimmed.count > 10 else {
+            statusMessage = "Invalid key format. Should start with 'sk-or-'."
+            return
+        }
+        do {
+            try keychain.store(key: KeychainService.apiKeyAccount, value: trimmed)
+            savedKey = trimmed
+            statusMessage = "Key saved securely."
+        } catch {
+            statusMessage = "Failed to save key: \(error.localizedDescription)"
         }
     }
 }
 
-#Preview {
-    NavigationStack { SettingsView() }
+struct OnboardingView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Welcome to Companion")
+                    .font(.title).bold()
+                Text("Your AI companion lives entirely on-device. All chats, memories, and personalization are stored locally.\n\nTo start, add your OpenRouter API key in Settings. Your key stays in the iOS Keychain — it never leaves your device.")
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                Button("Get Started") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .navigationTitle("Onboarding")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
 }

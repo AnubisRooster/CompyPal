@@ -2,71 +2,140 @@ import SwiftUI
 
 struct CompanionsView: View {
     @StateObject private var viewModel = CompanionsViewModel()
+    @State private var showSettings = false
+    @State private var showNewCompanion = false
+    @State private var selectedCompanion: CompanionInfo?
 
     var body: some View {
-        List {
-            ForEach(viewModel.companions, id: \.id) { companion in
-                NavigationLink {
-                    ChatView(companion: companion)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(companion.name)
-                            .font(.headline)
-                        HStack {
-                            Text(companion.relationshipStage.capitalized)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("· \(companion.turnCount) turns")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        if !companion.traits.isEmpty {
-                            Text(companion.traits.map { $0.0 }.joined(separator: ", "))
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-            }
-            .onDelete { offsets in
-                for index in offsets {
-                    let id = viewModel.companions[index].id
-                    Task { await viewModel.delete(id) }
-                }
-            }
-        }
-        .navigationTitle("Companions")
-        .toolbar {
-            Button("New", systemImage: "plus") {
-                viewModel.showCreate = true
-            }
-        }
-        .sheet(isPresented: $viewModel.showCreate) {
-            NavigationStack {
-                Form {
-                    TextField("Name", text: $viewModel.newName)
-                    Section("Personality") {
-                        ForEach(viewModel.newTraits.indices, id: \.self) { i in
-                            HStack {
-                                Text(viewModel.newTraits[i].0.capitalized)
-                                Slider(value: $viewModel.newTraits[i].1, in: 0...1)
+        NavigationStack {
+            Group {
+                if viewModel.isOffline {
+                    ContentUnavailableView(
+                        "Offline",
+                        systemImage: "wifi.slash",
+                        description: Text("Select a companion from earlier sessions.")
+                    )
+                } else if viewModel.companions.isEmpty {
+                    ContentUnavailableView(
+                        "No Companions",
+                        systemImage: "person.3",
+                        description: Text("Tap + to create your first companion.")
+                    )
+                } else {
+                    List {
+                        ForEach(viewModel.companions) { companion in
+                            Button {
+                                selectedCompanion = companion
+                            } label: {
+                                CompanionRow(companion: companion)
                             }
+                            .accessibilityLabel("Companion: \(companion.name)")
+                        }
+                        .onDelete { indexSet in
+                            Task { await viewModel.delete(at: indexSet) }
                         }
                     }
                 }
-                .navigationTitle("New Companion")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { viewModel.showCreate = false }
+            }
+            .navigationTitle("Companions")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Settings", systemImage: "gear") {
+                        showSettings = true
                     }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Create") { Task { await viewModel.create() } }
+                    .accessibilityLabel("Open settings")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !viewModel.isOffline {
+                        Button("New", systemImage: "plus") {
+                            showNewCompanion = true
+                        }
+                        .accessibilityLabel("Create a new companion")
                     }
                 }
             }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
+            .sheet(isPresented: $showNewCompanion) {
+                NewCompanionView { _ in
+                    Task { await viewModel.loadCompanions() }
+                }
+            }
+            .navigationDestination(item: $selectedCompanion) { companion in
+                ChatView(companion: companion)
+            }
+            .task { await viewModel.loadCompanions() }
+            .onReceive(NetworkMonitor.shared.$isConnected) { connected in
+                viewModel.isOffline = !connected
+            }
         }
-        .task { await viewModel.load() }
     }
 }
 
-#Preview { NavigationStack { CompanionsView() } }
+struct CompanionRow: View {
+    let companion: CompanionInfo
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AvatarThumbnail(companionId: companion.id, appearance: companion.appearance)
+                .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(companion.name)
+                    .font(.headline)
+                Text(companion.traits.prefix(3).map(\.0).joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Label("Level \(companion.level)", systemImage: "star.fill")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    Text(companion.relationshipStage.capitalized)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct AvatarThumbnail: View {
+    let companionId: Int64
+    let appearance: [(String, String)]
+    @State private var imageData: Data?
+
+    var body: some View {
+        Group {
+            if let data = imageData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(Color.gray.opacity(0.3))
+                    .overlay {
+                        Image(systemName: "person.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+            }
+        }
+        .task {
+            let store = MemoryStore()
+            if let record = try? await store.companion(id: companionId) {
+                let imageGenService = ImageGenerationService(client: OpenRouterClient())
+                imageData = await imageGenService.cachedImageData(companionId: companionId)
+            }
+        }
+    }
+}

@@ -6,13 +6,15 @@ class CompanionsViewModel: ObservableObject {
     @Published var showCreate = false
     @Published var newName = ""
     @Published var newTraits = [("friendly", 0.8), ("curious", 0.7)]
+    @Published var isOffline = false
 
     private let store = MemoryStore()
     private var userId: Int64 = 1
 
-    func load() async {
+    func loadCompanions() async {
         userId = (try? await store.ensureUser()) ?? 1
         companions = (try? await store.companions(userId: userId)) ?? []
+        isOffline = !NetworkMonitor.shared.isConnected
     }
 
     func create() async {
@@ -24,15 +26,18 @@ class CompanionsViewModel: ObservableObject {
             appearance: [("hair_color", "brown"), ("eye_color", "blue"), ("skin_tone", "light")]
         )
         newName = ""
-        await load()
+        await loadCompanions()
         showCreate = false
     }
 
-    func delete(_ id: Int64) async {
-        let queue = try? await DatabaseManager.shared.open()
-        try? await queue?.write { db in
-            try db.execute(sql: "DELETE FROM companion WHERE id = ?", arguments: [id])
+    func delete(at indexSet: IndexSet) async {
+        for index in indexSet {
+            let id = companions[index].id
+            let queue = try? await DatabaseManager.shared.open()
+            try? await queue?.write { db in
+                try db.execute(sql: "DELETE FROM companion WHERE id = ?", arguments: [id])
+            }
         }
-        await load()
+        await loadCompanions()
     }
 }
