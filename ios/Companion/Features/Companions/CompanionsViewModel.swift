@@ -13,6 +13,7 @@ class CompanionsViewModel: ObservableObject {
 
     func loadCompanions() async {
         userId = (try? await store.ensureUser()) ?? 1
+        try? await store.ensureSeedCompanions(userId: userId)
         companions = (try? await store.companions(userId: userId)) ?? []
         isOffline = !NetworkMonitor.shared.isConnected
     }

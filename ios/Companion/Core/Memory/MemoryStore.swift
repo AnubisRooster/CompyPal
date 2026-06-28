@@ -23,6 +23,28 @@ final class MemoryStore: @unchecked Sendable {
 
     // MARK: - Companion
 
+    func ensureSeedCompanions(userId: Int64) async throws {
+        let queue = try await db.open()
+        let count = try await queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM companion WHERE user_id = ?", arguments: [userId]) ?? 0
+        }
+        guard count == 0 else { return }
+
+        try await createCompanion(
+            userId: userId,
+            name: "Atlas",
+            traits: [("friendly", 0.85), ("thoughtful", 0.75), ("calm", 0.7), ("witty", 0.6)],
+            appearance: [("hair_color", "brown"), ("hair_length", "short"), ("hair_style", "straight"), ("eye_color", "blue"), ("skin_tone", "medium")]
+        )
+
+        try await createCompanion(
+            userId: userId,
+            name: "Riven",
+            traits: [("curious", 0.9), ("playful", 0.8), ("energetic", 0.7), ("wise", 0.6)],
+            appearance: [("hair_color", "red"), ("hair_length", "long"), ("hair_style", "wavy"), ("eye_color", "green"), ("skin_tone", "light")]
+        )
+    }
+
     func createCompanion(userId: Int64, name: String, traits: [(String, Double)], appearance: [(String, String)]) async throws -> Int64 {
         let queue = try await db.open()
         return try await queue.write { db in
