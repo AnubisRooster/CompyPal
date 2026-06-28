@@ -2,69 +2,11 @@
 
 **On-device iOS app** for interactive AI companions. Everything runs on your iPhone — the only external dependency is OpenRouter (bring your own API key). Each companion has an LLM-driven personality, a 3D parametric avatar rendered in SceneKit/RealityKit, voice interaction via AVFoundation, and persistent long-term memory in an embedded SQLite graph (GRDB.swift).
 
-```
-┌──────────────────────────────────────────────┐
-│                🏠 Companions                  │
-│                                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │          │  │          │  │          │   │
-│  │  Riven   │  │  Nova    │  │  + New   │   │
-│  │          │  │          │  │          │   │
-│  └──────────┘  └──────────┘  └──────────┘   │
-│                                              │
-│  Tap a companion to start chatting.          │
-└──────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────┐
-│   ← Back          Riven           ⚙️ Settings │
-│                                              │
-│  ┌─────────────────────────────────────────┐ │
-│  │              ░░░░░░░░░░░░░░              │ │
-│  │         ░░░░░░░░░░░░░░░░░░░░            │ │
-│  │       ░░░░░░░░░░░░░░░░░░░░░░░           │ │
-│  │      ░░░░░░░░░▓▓▓▓▓░░░░░░░░░░░          │ │
-│  │       ░░░░░▓▓▓▓▓▓▓▓▓▓▓░░░░░░░           │ │
-│  │        ░░░░▓▓▓▓▓▓▓▓▓▓▓░░░░░░            │ │
-│  │       ░░░░░░░░░▓▓▓▓▓░░░░░░░░░           │ │
-│  │      ░░░░░░░░░░░░░░░░░░░░░░░░░          │ │
-│  │         ░░░░░░░░░░░░░░░░░░░░            │ │
-│  │              ░░░░░░░░░░░░              │ │
-│  │                                          │ │
-│  │          3D parametric avatar            │ │
-│  └─────────────────────────────────────────┘ │
-│                                              │
-│  ┌──────────────────────────────────────────┐│
-│  │ Hi! How are you doing today?       12:30 ││
-│  └──────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────┐│
-│  │ I've been thinking about our last        ││
-│  │ conversation...                  12:31   ││
-│  └──────────────────────────────────────────┘│
-│                                              │
-│  ┌─────────────────────────────────┐  🎤    │
-│  │ Type a message...               │  Send  │
-│  └─────────────────────────────────┘        │
-└──────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────┐
-│  ⚙️ Settings                                 │
-│                                              │
-│  OpenRouter API Key       ****************   │
-│  ─────────────────────────────────────────── │
-│  Connection Status:  ✅ Connected            │
-│  Last Refreshed:     12:34 PM                │
-│  Available Models:   287                     │
-│  ─────────────────────────────────────────── │
-│  Chat Model:         Auto (free-first) ▶️    │
-│  Extract Model:      Auto (free-first) ▶️    │
-│  Image Model:        Auto (free-first) ▶️    │
-│  ─────────────────────────────────────────── │
-│  User Voices:                                │
-│    Riven:  Samantha · Pitch 1.0 · Rate 0.5  │
-│  ─────────────────────────────────────────── │
-│                                       v0.1.0 │
-└──────────────────────────────────────────────┘
-```
+<div align="center">
+  <img src="screenshots/compose_chat_tab.png" width="280" alt="Chat tab — companion conversation with avatar" />
+  <img src="screenshots/compose_companions_tab.png" width="280" alt="Companions list" />
+  <img src="screenshots/compose_settings_tab.png" width="280" alt="Settings — API key, model selection, voices" />
+</div>
 
 ## Features
 
