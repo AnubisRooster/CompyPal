@@ -57,7 +57,7 @@ struct ChatView: View {
 
     private var companionHeader: some View {
         CompanionAvatarView(viewModel: viewModel.avatarViewModel)
-            .frame(height: 220)
+            .frame(height: 360)
             .accessibilityLabel(avatarAccessibilityLabel)
             .accessibilityAddTraits(.isImage)
     }

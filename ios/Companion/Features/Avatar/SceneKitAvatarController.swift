@@ -333,7 +333,17 @@ final class SceneKitAvatarController: AvatarController {
             rootNode.addChildNode(container)
         }
 
-        if let glbRootNode { frameModel(glbRootNode) }
+        if let glbRootNode {
+            // Hide stray environment/helper meshes (e.g. Blender's default "Cube",
+            // exported into riven.glb) that otherwise render as a large gray block and
+            // dominate the framing bounding box.
+            glbRootNode.enumerateHierarchy { node, _ in
+                if let name = node.name, name.lowercased().hasPrefix("cube") {
+                    node.isHidden = true
+                }
+            }
+            frameModel(glbRootNode)
+        }
         headNode?.isHidden = true
         buildMorpherIndex()
         recoverMorphTargetNames(from: url)
@@ -354,17 +364,17 @@ final class SceneKitAvatarController: AvatarController {
         _ = maxDim
         guard dy > 0 else { return }
 
-        // Frame a head-and-shoulders portrait: scale by the model's height so the head
-        // size is predictable, and anchor the pivot just below the top of the head so
-        // the face sits in the center of the (wide, short) avatar strip.
-        let targetHeight: Float = 8.0
+        // Frame the full body: scale by the model's height so head-to-feet fits the
+        // camera's vertical field of view, center the model, and lift it so its center
+        // aligns with the camera's eye line for a balanced full-body shot.
+        let targetHeight: Float = 2.7
         let scale = targetHeight / dy
-        let anchorX = (minV.x + maxV.x) / 2
-        let anchorY = maxV.y - dy * 0.13
-        let anchorZ = (minV.z + maxV.z) / 2
-        node.pivot = SCNMatrix4MakeTranslation(anchorX, anchorY, anchorZ)
+        let centerX = (minV.x + maxV.x) / 2
+        let centerY = (minV.y + maxV.y) / 2
+        let centerZ = (minV.z + maxV.z) / 2
+        node.pivot = SCNMatrix4MakeTranslation(centerX, centerY, centerZ)
         node.scale = SCNVector3(scale, scale, scale)
-        node.position = SCNVector3(0, 0, 0)
+        node.position = SCNVector3(0, 0.2, 0)
         avatarLog.info("Framed GLB: rawMaxDim=\(maxDim), height=\(dy), scale=\(scale)")
     }
 
@@ -376,7 +386,7 @@ final class SceneKitAvatarController: AvatarController {
         var maxV = SCNVector3(-Float.greatestFiniteMagnitude, -.greatestFiniteMagnitude, -.greatestFiniteMagnitude)
         var found = false
         root.enumerateHierarchy { node, _ in
-            guard node.geometry != nil else { return }
+            guard node.geometry != nil, !node.isHidden else { return }
             let (lmin, lmax) = node.boundingBox
             guard lmax.x >= lmin.x else { return }
             let corners = [
