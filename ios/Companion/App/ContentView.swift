@@ -28,6 +28,27 @@ struct ContentView: View {
             }
             .tabItem { Label("Settings", systemImage: "gear") }
         }
+        .task {
+            await loadDefaultCompanion()
+        }
+    }
+
+    /// Picks a default companion to show on the Chat tab at launch.
+    /// Prefers Riven (the canonical 3D-avatar companion), falls back to first available.
+    /// Retries briefly to handle the race where seeding hasn't finished writing yet
+    /// on a cold launch with a fresh database.
+    private func loadDefaultCompanion() async {
+        guard recentCompanion == nil else { return }
+        let store = MemoryStore()
+        guard let userId = try? await store.ensureUser() else { return }
+
+        for _ in 0..<5 {
+            if let companions = try? await store.companions(userId: userId), !companions.isEmpty {
+                recentCompanion = companions.first(where: { $0.name == "Riven" }) ?? companions.first
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
     }
 }
 
