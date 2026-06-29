@@ -12,8 +12,19 @@ struct SettingsView: View {
     @AppStorage("image_gen_enabled") private var imageGenEnabled = false
     @AppStorage("tts_rate") private var ttsRate: Double = 0.5
     @AppStorage("has_onboarded") private var hasOnboarded = false
+    @AppStorage("pinned_model_id") private var pinnedModelId = ""
+
+    @State private var catalogEntries: [CatalogEntry] = []
+    @State private var catalogStatus: String?
+    @State private var isRefreshing = false
 
     private let keychain = KeychainService()
+    private let catalogCache = CatalogCache()
+    private let catalogFetcher = CatalogFetcher()
+
+    private var chatModels: [CatalogEntry] {
+        SelectionPolicy(role: .chat, catalog: catalogEntries, pinnedModelId: nil).rank()
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,6 +52,39 @@ struct SettingsView: View {
 
                     if let msg = statusMessage {
                         Text(msg)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section("Model") {
+                    if isRefreshing {
+                        HStack {
+                            ProgressView()
+                            Text("Refreshing models…").foregroundColor(.secondary)
+                        }
+                    } else {
+                        Button("Refresh Models") {
+                            Task { await refreshCatalog() }
+                        }
+                        .disabled(savedKey?.isEmpty ?? true)
+                    }
+
+                    if !chatModels.isEmpty {
+                        Picker("Selected Model", selection: $pinnedModelId) {
+                            Text("Auto (cost-first)").tag("")
+                            ForEach(chatModels, id: \.id) { model in
+                                Text(model.name ?? model.id).tag(model.id)
+                            }
+                        }
+                    }
+
+                    if let status = catalogStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if chatModels.isEmpty {
+                        Text("No models loaded yet. Tap Refresh Models.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -84,6 +128,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task { await loadCachedCatalog() }
             .alert("Clear Memory", isPresented: $showAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Clear", role: .destructive) {
@@ -134,8 +179,34 @@ struct SettingsView: View {
             try keychain.store(key: KeychainService.apiKeyAccount, value: trimmed)
             savedKey = trimmed
             statusMessage = "Key saved securely."
+            // Populate the model catalog now that we have a key, so the user can
+            // chat immediately instead of hitting "No models available".
+            Task { await refreshCatalog() }
         } catch {
             statusMessage = "Failed to save key: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadCachedCatalog() async {
+        if let cached = await catalogCache.load(), !cached.entries.isEmpty {
+            catalogEntries = cached.entries
+        }
+    }
+
+    private func refreshCatalog() async {
+        guard let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else {
+            catalogStatus = "Add and save an API key first."
+            return
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let entries = try await catalogFetcher.fetch(apiKey: key)
+            try await catalogCache.save(entries: entries)
+            catalogEntries = entries
+            catalogStatus = "Loaded \(entries.count) models."
+        } catch {
+            catalogStatus = "Refresh failed: \(error.localizedDescription)"
         }
     }
 }

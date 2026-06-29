@@ -90,6 +90,10 @@ class ChatViewModel: ObservableObject {
         isStreaming = true
         avatarViewModel.setThinking(true)
 
+        // Make sure we have models to try, fetching the catalog on demand if the
+        // launch-time refresh hadn't populated the cache yet.
+        await ensureChatCandidates()
+
         // Run independent DB operations concurrently before the streaming task
         async let turnIdTask = (try? store.insertTurn(companionId: companion.id, role: "user", text: trimmed)) ?? 0
         async let stageTask = (try? store.relationshipStage(companionId: companion.id)) ?? "acquaintance"
@@ -338,8 +342,25 @@ class ChatViewModel: ObservableObject {
 
     private func loadChatCandidates() async {
         if let cached = await catalogCache.load() {
-            chatCandidates = SelectionPolicy(role: .chat, catalog: cached.entries, pinnedModelId: nil).rank()
+            let pinned = UserDefaults.standard.string(forKey: "pinned_model_id")
+            let pinnedId = (pinned?.isEmpty ?? true) ? nil : pinned
+            chatCandidates = SelectionPolicy(role: .chat, catalog: cached.entries, pinnedModelId: pinnedId).rank()
         }
+    }
+
+    /// Guarantees a usable candidate list before sending. At cold launch the catalog
+    /// fetch may still be in flight when `load()` first reads the (empty) cache, which
+    /// previously left `chatCandidates` empty for the whole session. Re-read the cache
+    /// and, if it's still empty while online with a key, fetch the catalog on demand.
+    private func ensureChatCandidates() async {
+        if chatCandidates.isEmpty {
+            await loadChatCandidates()
+        }
+        guard chatCandidates.isEmpty, hasApiKey, !isOffline else { return }
+        guard let key = try? await keychain.read(key: KeychainService.apiKeyAccount), !key.isEmpty else { return }
+        guard let entries = try? await CatalogFetcher().fetch(apiKey: key), !entries.isEmpty else { return }
+        try? await catalogCache.save(entries: entries)
+        await loadChatCandidates()
     }
 
     private func buildChatMessages(system: String, history: [ChatMessage]) -> [Message] {
