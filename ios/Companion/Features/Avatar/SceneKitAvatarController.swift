@@ -34,6 +34,31 @@ final class SceneKitAvatarController: AvatarController {
     private var currentEmotionIntensity: Float = 0
     private var currentGaze: GazeTarget = .camera
     private var isIdleEnabled = true
+    private var reduceMotion = false
+
+    // GLB skeleton driving (idle pose, gaze, gestures). VRM/VRoid humanoids ship in a
+    // static T-pose with no animation clips, so all body/head motion is generated here
+    // by offsetting skeleton bones from their captured rest transforms each frame.
+    private struct GLBBone {
+        let node: SCNNode
+        let restEuler: SCNVector3
+        let restPosition: SCNVector3
+    }
+    private var glbBones: [String: GLBBone] = [:]
+
+    // Smoothed gaze (radians), driven toward target each frame.
+    private var gazeYaw: Float = 0
+    private var gazePitch: Float = 0
+    private var targetGazeYaw: Float = 0
+    private var targetGazePitch: Float = 0
+
+    // A transient, time-based gesture composited additively on top of idle + gaze.
+    private struct ActiveGesture {
+        let gesture: Gesture
+        let start: TimeInterval
+        let duration: TimeInterval
+    }
+    private var activeGesture: ActiveGesture?
     private var appearanceColorMap: [String: UIColor] = [:]
     private var morpherIndex: [String: [(morpher: SCNMorpher, targetIndex: Int)]] = [:]
     var morpherIndexCount: Int { morpherIndex.values.reduce(0) { $0 + $1.count } }
@@ -194,26 +219,51 @@ final class SceneKitAvatarController: AvatarController {
     }
 
     func playGesture(_ gesture: Gesture) {
-        // Gestures require animation clips from a GLB. For procedural, do node transforms.
-        guard hasGLB else {
-            applyProceduralGesture(gesture)
+        if hasGLB {
+            // No animation clips ship with the VRM, so gestures are generated as
+            // additive, time-based bone offsets in the skeleton update.
+            let duration: TimeInterval
+            switch gesture {
+            case .shakeHead: duration = 0.9
+            case .nod, .laugh: duration = 0.7
+            default: duration = 0.6
+            }
+            activeGesture = ActiveGesture(gesture: gesture, start: CACurrentMediaTime(), duration: duration)
             return
         }
-        // Look up clip name from rig mapping
-        guard let mapping = rigMapping, let clipName = mapping.gestures[gesture.rawValue] else { return }
-        playAnimationClip(named: clipName)
+        applyProceduralGesture(gesture)
     }
 
     func setGaze(_ target: GazeTarget) {
         currentGaze = target
-        updateGaze()
+        if hasGLB {
+            setGLBGazeTarget(target)
+        } else {
+            updateGaze()
+        }
     }
 
     func setIdle(_ enabled: Bool) {
         isIdleEnabled = enabled
     }
 
+    /// Suspends all generated motion (Reduce Motion accessibility setting).
+    func setReduceMotion(_ enabled: Bool) {
+        reduceMotion = enabled
+        if enabled, hasGLB {
+            // Snap back to the static rest pose.
+            for (_, bone) in glbBones {
+                bone.node.eulerAngles = bone.restEuler
+                bone.node.position = bone.restPosition
+            }
+        }
+    }
+
     func tick(_ dt: TimeInterval) {
+        if hasGLB {
+            updateGLBSkeleton(dt)
+            return
+        }
         guard isIdleEnabled else { return }
         idleLifeTick(dt)
     }
@@ -347,6 +397,66 @@ final class SceneKitAvatarController: AvatarController {
         headNode?.isHidden = true
         buildMorpherIndex()
         recoverMorphTargetNames(from: url)
+        resolveGLBBones()
+        applyRestPose()
+    }
+
+    // MARK: - GLB skeleton resolution & posing
+
+    /// Caches the humanoid bones we animate, recording each bone's rest (bind-pose)
+    /// transform so per-frame motion can be expressed as offsets from rest.
+    private func resolveGLBBones() {
+        glbBones.removeAll()
+        guard let root = glbRootNode else { return }
+
+        func add(_ logical: String, _ boneName: String?) {
+            guard let boneName, !boneName.isEmpty,
+                  let node = root.childNode(withName: boneName, recursively: true) else { return }
+            glbBones[logical] = GLBBone(node: node, restEuler: node.eulerAngles, restPosition: node.position)
+        }
+
+        let sk = rigMapping?.skeleton ?? [:]
+        add("head", sk["head"])
+        add("neck", sk["neck"])
+        add("upperChest", sk["upperChest"])
+        add("chest", sk["chest"])
+        add("spine", sk["spine"])
+        add("hips", sk["hips"])
+        add("leftEye", sk["leftEye"])
+        add("rightEye", sk["rightEye"])
+
+        // Arm bones aren't in the rig mapping; use the VRM/VRoid standard names.
+        add("leftUpperArm", "J_Bip_L_UpperArm")
+        add("rightUpperArm", "J_Bip_R_UpperArm")
+        add("leftLowerArm", "J_Bip_L_LowerArm")
+        add("rightLowerArm", "J_Bip_R_LowerArm")
+        add("leftHand", "J_Bip_L_Hand")
+        add("rightHand", "J_Bip_R_Hand")
+
+        avatarLog.info("Resolved GLB bones: \(self.glbBones.keys.sorted().joined(separator: ", "))")
+    }
+
+    /// Replaces the imported T-pose with a relaxed standing pose by lowering the upper
+    /// arms to the sides and adding a slight elbow bend, then re-captures those bones'
+    /// rest transforms so gesture offsets compose from the relaxed pose.
+    private func applyRestPose() {
+        func pose(_ logical: String, _ delta: SCNVector3) {
+            guard let bone = glbBones[logical] else { return }
+            let posed = SCNVector3(bone.restEuler.x + delta.x,
+                                   bone.restEuler.y + delta.y,
+                                   bone.restEuler.z + delta.z)
+            bone.node.eulerAngles = posed
+            glbBones[logical] = GLBBone(node: bone.node, restEuler: posed, restPosition: bone.restPosition)
+        }
+
+        // Lower the upper arms ~70° toward the body. Signs are mirrored per side and
+        // tuned for the VRoid bone axes (rotation about Z drops the arm).
+        let armDrop: Float = 1.22
+        pose("leftUpperArm", SCNVector3(0, 0, -armDrop))
+        pose("rightUpperArm", SCNVector3(0, 0, armDrop))
+        // Small natural elbow bend.
+        pose("leftLowerArm", SCNVector3(0, -0.15, -0.12))
+        pose("rightLowerArm", SCNVector3(0, 0.15, 0.12))
     }
 
     /// Centers and uniformly scales a freshly-loaded GLB so it fits the fixed camera.
@@ -744,6 +854,135 @@ final class SceneKitAvatarController: AvatarController {
             self?.leftEyeNode?.scale = SCNVector3(1, 1, 1)
             self?.rightEyeNode?.scale = SCNVector3(1, 1, 1)
             SCNTransaction.commit()
+        }
+    }
+
+    // MARK: - GLB skeleton life (idle pose, breathing, gaze, gestures, blink)
+
+    private var glbBreathePhase: Float = 0
+    private var glbSwayPhase: Float = 0
+    private var glbLastBlink: TimeInterval = 0
+    private var glbNextBlinkInterval: TimeInterval = 3
+    private var glbLastIdleGesture: TimeInterval = 0
+    private var glbNextIdleGestureInterval: TimeInterval = 8
+
+    /// Master per-frame update for the GLB humanoid. Composes three additive layers on
+    /// top of each bone's rest transform: ambient idle motion (breathing/sway/weight
+    /// shift), smoothed gaze, and a transient gesture. Breathing and blinking continue
+    /// even while "idle" is suspended (e.g. during speech) so she never looks frozen;
+    /// the larger idle sway is gated by `isIdleEnabled`.
+    private func updateGLBSkeleton(_ dt: TimeInterval) {
+        guard hasGLB, !reduceMotion else { return }
+        let now = CACurrentMediaTime()
+        let idleAmp: Float = isIdleEnabled ? 1 : 0
+
+        glbBreathePhase += Float(dt) * 1.5
+        glbSwayPhase += Float(dt) * 0.55
+        let breathe = sin(glbBreathePhase)
+        let sway = sin(glbSwayPhase)
+
+        // Smoothly approach the current gaze target.
+        let lerp = min(Float(dt) * 6, 1)
+        gazeYaw += (targetGazeYaw - gazeYaw) * lerp
+        gazePitch += (targetGazePitch - gazePitch) * lerp
+
+        // Occasionally play a small idle gesture so resting isn't perfectly static.
+        if idleAmp > 0, activeGesture == nil, now - glbLastIdleGesture > glbNextIdleGestureInterval {
+            let idleGestures: [Gesture] = [.tiltHead, .nod, .leanBack]
+            activeGesture = ActiveGesture(gesture: idleGestures.randomElement() ?? .tiltHead,
+                                          start: now, duration: 0.8)
+            glbLastIdleGesture = now
+            glbNextIdleGestureInterval = TimeInterval.random(in: 7...14)
+        }
+
+        // Evaluate the transient gesture into bone-space deltas.
+        var gHeadPitch: Float = 0, gHeadYaw: Float = 0, gHeadRoll: Float = 0, gSpinePitch: Float = 0
+        if let ag = activeGesture {
+            let p = Float((now - ag.start) / ag.duration)
+            if p >= 1 {
+                activeGesture = nil
+            } else {
+                let env = sin(Float.pi * p)
+                switch ag.gesture {
+                case .nod, .laugh: gHeadPitch = 0.22 * env
+                case .shakeHead: gHeadYaw = sin(Float.pi * 2 * p) * 0.25
+                case .tiltHead, .think: gHeadRoll = 0.26 * env
+                case .leanIn: gSpinePitch = 0.14 * env
+                case .leanBack: gSpinePitch = -0.12 * env
+                case .shrug: gHeadPitch = 0.05 * env; gHeadRoll = 0.1 * env
+                default: gHeadPitch = 0.1 * env
+                }
+            }
+        }
+
+        setBone("upperChest", pitch: breathe * 0.018, yaw: 0, roll: sway * 0.02 * idleAmp)
+        setBone("chest", pitch: breathe * 0.012, yaw: 0, roll: sway * 0.018 * idleAmp)
+        setBone("spine", pitch: breathe * 0.008 + gSpinePitch, yaw: 0, roll: sway * 0.022 * idleAmp)
+
+        if let hips = glbBones["hips"] {
+            hips.node.position = SCNVector3(hips.restPosition.x,
+                                            hips.restPosition.y + breathe * 0.004 * idleAmp,
+                                            hips.restPosition.z)
+            hips.node.eulerAngles = SCNVector3(hips.restEuler.x,
+                                               hips.restEuler.y + sway * 0.02 * idleAmp,
+                                               hips.restEuler.z)
+        }
+
+        setBone("neck",
+                pitch: gHeadPitch * 0.4 + gazePitch * 0.3,
+                yaw: gHeadYaw * 0.4 + gazeYaw * 0.3,
+                roll: gHeadRoll * 0.3)
+        setBone("head",
+                pitch: gHeadPitch * 0.6 + gazePitch * 0.5 + breathe * 0.01 * idleAmp,
+                yaw: gHeadYaw * 0.6 + gazeYaw * 0.5 + sway * 0.02 * idleAmp,
+                roll: gHeadRoll * 0.7)
+
+        setBone("leftEye", pitch: gazePitch * 0.5, yaw: gazeYaw * 0.6, roll: 0)
+        setBone("rightEye", pitch: gazePitch * 0.5, yaw: gazeYaw * 0.6, roll: 0)
+
+        updateGLBBlink(now: now)
+    }
+
+    private func setBone(_ logical: String, pitch: Float, yaw: Float, roll: Float) {
+        guard let bone = glbBones[logical] else { return }
+        bone.node.eulerAngles = SCNVector3(bone.restEuler.x + pitch,
+                                           bone.restEuler.y + yaw,
+                                           bone.restEuler.z + roll)
+    }
+
+    private func setGLBGazeTarget(_ target: GazeTarget) {
+        switch target {
+        case .camera, .user:
+            targetGazeYaw = 0
+            targetGazePitch = 0
+        case .away:
+            // Glance off to the side and slightly up, as if thinking.
+            targetGazeYaw = 0.32
+            targetGazePitch = -0.12
+        case .idle:
+            targetGazeYaw = Float.random(in: -0.12...0.12)
+            targetGazePitch = Float.random(in: -0.06...0.06)
+        }
+    }
+
+    private func updateGLBBlink(now: TimeInterval) {
+        guard now - glbLastBlink > glbNextBlinkInterval else { return }
+        glbLastBlink = now
+        glbNextBlinkInterval = TimeInterval.random(in: 2.5...5.5)
+
+        let leftName = rigMapping?.blink.left ?? "blink_left"
+        let rightName = rigMapping?.blink.right ?? "blink_right"
+        setMorphWeight(named: leftName, weight: 1)
+        setMorphWeight(named: rightName, weight: 1)
+        setMorphWeight(named: "blink_left", weight: 1)
+        setMorphWeight(named: "blink_right", weight: 1)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) { [weak self] in
+            guard let self else { return }
+            self.setMorphWeight(named: leftName, weight: 0)
+            self.setMorphWeight(named: rightName, weight: 0)
+            self.setMorphWeight(named: "blink_left", weight: 0)
+            self.setMorphWeight(named: "blink_right", weight: 0)
         }
     }
 

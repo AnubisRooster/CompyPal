@@ -61,11 +61,14 @@ final class AvatarViewModel: ObservableObject {
         controller = SceneKitAvatarController()
         startDisplayLink()
         emotionSystem.setEmotion(.neutral, intensity: 0, duration: 0)
+        controller.setReduceMotion(UIAccessibility.isReduceMotionEnabled)
         reduceMotionObserver = NotificationCenter.default.addObserver(
             forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            self?.idleSystem.setEnabled(!UIAccessibility.isReduceMotionEnabled)
+            let reduce = UIAccessibility.isReduceMotionEnabled
+            self?.idleSystem.setEnabled(!reduce)
+            self?.controller.setReduceMotion(reduce)
         }
     }
 
@@ -194,7 +197,10 @@ final class AvatarViewModel: ObservableObject {
         let now = CACurrentMediaTime()
         let dt = now - lastTimestamp
         lastTimestamp = now
-        idleSystem.tick(dt)
+        // Drive the controller every frame. The controller decides what to animate:
+        // the GLB skeleton stays alive (breathing/blink/gaze/gestures) regardless of
+        // the idle flag, while the procedural fallback still honors `isIdleEnabled`.
+        controller.tick(dt)
         tickLipSync()
     }
 
