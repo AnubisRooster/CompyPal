@@ -51,6 +51,8 @@ final class SceneKitAvatarController: AvatarController {
         sceneView.backgroundColor = .clear
         sceneView.autoenablesDefaultLighting = true
         sceneView.allowsCameraControl = false
+        // Keep rendering so the loaded model, idle motion, and lip sync stay live.
+        sceneView.rendersContinuously = true
 
         rootNode = SCNNode()
         scene.rootNode.addChildNode(rootNode)
@@ -220,7 +222,14 @@ final class SceneKitAvatarController: AvatarController {
 
     private func setupCamera() {
         let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
+        let camera = SCNCamera()
+        // The avatar viewport is wide and short. Lock the field of view to the
+        // vertical axis so a tall humanoid is framed by height (not width), otherwise
+        // the default horizontal FOV crops the model down to a torso close-up.
+        camera.fieldOfView = 55
+        camera.projectionDirection = .vertical
+        camera.zNear = 0.01
+        cameraNode.camera = camera
         cameraNode.position = SCNVector3(0, 0.2, 3)
         scene.rootNode.addChildNode(cameraNode)
     }
@@ -324,9 +333,66 @@ final class SceneKitAvatarController: AvatarController {
             rootNode.addChildNode(container)
         }
 
+        if let glbRootNode { frameModel(glbRootNode) }
         headNode?.isHidden = true
         buildMorpherIndex()
         recoverMorphTargetNames(from: url)
+    }
+
+    /// Centers and uniformly scales a freshly-loaded GLB so it fits the fixed camera.
+    /// Imported VRM/glTF humanoids are full-scale (≈1.5m) and arrive with their feet
+    /// near the origin, which leaves them almost entirely out of the procedural-tuned
+    /// camera frame — the cause of an apparently empty avatar view.
+    private func frameModel(_ node: SCNNode) {
+        guard let (minV, maxV) = hierarchyBoundingBox(of: node) else { return }
+        let dx = maxV.x - minV.x
+        let dy = maxV.y - minV.y
+        let dz = maxV.z - minV.z
+        let maxDim = max(dx, max(dy, dz))
+        guard maxDim.isFinite, maxDim > 0 else { return }
+
+        _ = maxDim
+        guard dy > 0 else { return }
+
+        // Frame a head-and-shoulders portrait: scale by the model's height so the head
+        // size is predictable, and anchor the pivot just below the top of the head so
+        // the face sits in the center of the (wide, short) avatar strip.
+        let targetHeight: Float = 8.0
+        let scale = targetHeight / dy
+        let anchorX = (minV.x + maxV.x) / 2
+        let anchorY = maxV.y - dy * 0.13
+        let anchorZ = (minV.z + maxV.z) / 2
+        node.pivot = SCNMatrix4MakeTranslation(anchorX, anchorY, anchorZ)
+        node.scale = SCNVector3(scale, scale, scale)
+        node.position = SCNVector3(0, 0, 0)
+        avatarLog.info("Framed GLB: rawMaxDim=\(maxDim), height=\(dy), scale=\(scale)")
+    }
+
+    /// Robust bounding box over a node's full subtree, in `root`'s coordinate space.
+    /// Unlike `flattenedClone().boundingBox`, this correctly bounds skinned meshes by
+    /// converting each geometry node's local bounds into the root's space.
+    private func hierarchyBoundingBox(of root: SCNNode) -> (min: SCNVector3, max: SCNVector3)? {
+        var minV = SCNVector3(Float.greatestFiniteMagnitude, .greatestFiniteMagnitude, .greatestFiniteMagnitude)
+        var maxV = SCNVector3(-Float.greatestFiniteMagnitude, -.greatestFiniteMagnitude, -.greatestFiniteMagnitude)
+        var found = false
+        root.enumerateHierarchy { node, _ in
+            guard node.geometry != nil else { return }
+            let (lmin, lmax) = node.boundingBox
+            guard lmax.x >= lmin.x else { return }
+            let corners = [
+                SCNVector3(lmin.x, lmin.y, lmin.z), SCNVector3(lmax.x, lmin.y, lmin.z),
+                SCNVector3(lmin.x, lmax.y, lmin.z), SCNVector3(lmin.x, lmin.y, lmax.z),
+                SCNVector3(lmax.x, lmax.y, lmin.z), SCNVector3(lmax.x, lmin.y, lmax.z),
+                SCNVector3(lmin.x, lmax.y, lmax.z), SCNVector3(lmax.x, lmax.y, lmax.z),
+            ]
+            for corner in corners {
+                let p = root.convertPosition(corner, from: node)
+                minV.x = Swift.min(minV.x, p.x); minV.y = Swift.min(minV.y, p.y); minV.z = Swift.min(minV.z, p.z)
+                maxV.x = Swift.max(maxV.x, p.x); maxV.y = Swift.max(maxV.y, p.y); maxV.z = Swift.max(maxV.z, p.z)
+                found = true
+            }
+        }
+        return found ? (minV, maxV) : nil
     }
 
     // MARK: - Appearance
