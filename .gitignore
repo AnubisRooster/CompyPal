@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 .env
 ios/Companion.xcodeproj/
+ios/.build_dd/
+ios/build/

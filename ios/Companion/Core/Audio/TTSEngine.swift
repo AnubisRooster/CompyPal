@@ -84,7 +84,13 @@ class TTSEngine: NSObject {
     // MARK: - Buffer processing (safe to call off main)
 
     nonisolated static func concatenateBuffers(_ buffers: [AVAudioPCMBuffer]) -> AVAudioPCMBuffer {
-        if buffers.isEmpty { fatalError("empty buffer list") }
+        // Callers guard against empty input, but never crash the app from a reusable
+        // helper — return a valid empty buffer instead of trapping. These two system
+        // initializers are guaranteed non-nil for these constant, valid arguments.
+        if buffers.isEmpty {
+            let format = AVAudioFormat(standardFormatWithSampleRate: 22050, channels: 1)!
+            return AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1)!
+        }
         if buffers.count == 1 { return buffers[0] }
         let totalFrames = buffers.reduce(0) { $0 + Int($1.frameLength) }
         let format = buffers[0].format

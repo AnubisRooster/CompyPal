@@ -69,7 +69,7 @@ enum KeychainError: Error, CustomStringConvertible {
         case .encodeFailed: return "Could not encode value for keychain storage"
         case .storeFailed(let status): return "Keychain write failed (OSStatus: \(status))"
         case .readFailed(let status): return "Keychain read failed (OSStatus: \(status))"
-        case .invalidKeyFormat: return "Key should start with 'sk-or-v1-'"
+        case .invalidKeyFormat: return "Key should start with 'sk-or-'"
         }
     }
 }

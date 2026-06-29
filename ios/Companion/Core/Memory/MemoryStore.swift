@@ -182,19 +182,22 @@ final class MemoryStore: @unchecked Sendable {
 
     func deduplicateMemory(content: String, companionId: Int64) async throws -> Bool {
         let queue = try await db.open()
-        let normalized = content
+        // SQL's TRIM only strips leading/trailing whitespace, so it can't reproduce
+        // the internal-whitespace collapse below. Compare with identical normalization
+        // applied in Swift to both the candidate and the stored rows.
+        let normalized = Self.normalizeMemoryContent(content)
+        return try await queue.read { db in
+            let existing = try String.fetchAll(db, sql: "SELECT content FROM memory WHERE companion_id = ?", arguments: [companionId])
+            return existing.contains { Self.normalizeMemoryContent($0) == normalized }
+        }
+    }
+
+    static func normalizeMemoryContent(_ content: String) -> String {
+        content
             .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        return try await queue.read { db in
-            let count = try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM memory
-                WHERE companion_id = ? AND LOWER(TRIM(content)) = ?
-            """, arguments: [companionId, normalized]) ?? 0
-            return count > 0
-        }
     }
 
     // MARK: - Appearance

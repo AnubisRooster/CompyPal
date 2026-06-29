@@ -12,6 +12,13 @@ actor DatabaseManager {
         self.useInMemory = inMemory
     }
 
+    /// Injects an already-prepared (and migrated) queue. Used by integration tests
+    /// so they can point the store at a throwaway database.
+    init(override queue: DatabaseQueue) {
+        self.useInMemory = false
+        self.dbQueue = queue
+    }
+
     func open() throws -> DatabaseQueue {
         if let queue = dbQueue { return queue }
         let queue: DatabaseQueue
@@ -70,6 +77,18 @@ actor DatabaseManager {
                 t.column("pitch", .double).notNull().defaults(to: 1.0)
                 t.column("rate", .double).notNull().defaults(to: 0.5)
             }
+            // conversation_turn must be created before `memory`, which has a foreign
+            // key referencing it. GRDB resolves the referenced table's primary key by
+            // introspecting it at creation time, so a forward reference fails with
+            // "no such table: conversation_turn" and aborts the whole migration.
+            try db.create(table: "conversation_turn") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("companion_id", .integer).notNull().references("companion", onDelete: .cascade)
+                t.column("role", .text).notNull()
+                t.column("text", .text).notNull()
+                // Use explicit Date() in INSERTs, not CURRENT_TIMESTAMP (space-format breaks GRDB's ISO-8601 decoder)
+                t.column("created_at", .datetime).notNull()
+            }
             try db.create(table: "memory") { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("user_id", .integer).notNull().references("user", onDelete: .cascade)
@@ -78,14 +97,6 @@ actor DatabaseManager {
                 t.column("kind", .text).notNull()
                 t.column("salience", .double).notNull().defaults(to: 0.5)
                 t.column("source_turn_id", .integer).references("conversation_turn", onDelete: .setNull)
-                // Use explicit Date() in INSERTs, not CURRENT_TIMESTAMP (space-format breaks GRDB's ISO-8601 decoder)
-                t.column("created_at", .datetime).notNull()
-            }
-            try db.create(table: "conversation_turn") { t in
-                t.autoIncrementedPrimaryKey("id")
-                t.column("companion_id", .integer).notNull().references("companion", onDelete: .cascade)
-                t.column("role", .text).notNull()
-                t.column("text", .text).notNull()
                 // Use explicit Date() in INSERTs, not CURRENT_TIMESTAMP (space-format breaks GRDB's ISO-8601 decoder)
                 t.column("created_at", .datetime).notNull()
             }

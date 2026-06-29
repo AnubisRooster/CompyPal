@@ -58,7 +58,12 @@ actor OpenRouterClient {
                         return
                     }
                     guard http.statusCode == 200 else {
-                        continuation.finish(throwing: ClientError.httpError(http.statusCode))
+                        var body = ""
+                        for try await line in bytes.lines {
+                            body += line
+                            if body.count > 1000 { break }
+                        }
+                        continuation.finish(throwing: ClientError.serverMessage(http.statusCode, Self.errorMessage(from: Data(body.utf8))))
                         return
                     }
 
@@ -94,8 +99,10 @@ actor OpenRouterClient {
         req.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw ClientError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
+        guard http.statusCode != 401 else { throw ClientError.unauthorized }
+        guard http.statusCode == 200 else {
+            throw ClientError.serverMessage(http.statusCode, Self.errorMessage(from: data))
         }
         let decoded = try decoder.decode(ChatResponse.self, from: data)
         return decoded.choices?.first?.message.content ?? ""
@@ -128,7 +135,7 @@ actor OpenRouterClient {
         guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
         guard http.statusCode != 401 else { throw ClientError.unauthorized }
         guard http.statusCode == 200 else {
-            throw ClientError.httpError(http.statusCode)
+            throw ClientError.serverMessage(http.statusCode, Self.errorMessage(from: data))
         }
         let decoded = try decoder.decode(ImageResponse.self, from: data)
 
@@ -141,12 +148,28 @@ actor OpenRouterClient {
         }
         throw ClientError.invalidResponse
     }
+
+    /// Extracts a human-readable message from an OpenRouter error response body.
+    /// Falls back to the raw (truncated) body when the JSON shape is unexpected.
+    private static func errorMessage(from data: Data) -> String {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let err = obj["error"] as? [String: Any], let msg = err["message"] as? String, !msg.isEmpty {
+                return msg
+            }
+            if let msg = obj["message"] as? String, !msg.isEmpty {
+                return msg
+            }
+        }
+        let raw = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? "Unknown error" : String(raw.prefix(300))
+    }
 }
 
-enum ClientError: Error, CustomStringConvertible {
+enum ClientError: Error, LocalizedError, CustomStringConvertible {
     case noKey
     case invalidResponse
     case httpError(Int)
+    case serverMessage(Int, String)
     case unauthorized
 
     var description: String {
@@ -154,9 +177,14 @@ enum ClientError: Error, CustomStringConvertible {
         case .noKey: return "No API key configured"
         case .invalidResponse: return "Invalid response from server"
         case .httpError(let code): return "HTTP \(code)"
+        case .serverMessage(let code, let message): return "HTTP \(code): \(message)"
         case .unauthorized: return "Invalid or revoked API key. Update it in Settings."
         }
     }
+
+    // Conform to LocalizedError so `error.localizedDescription` (used in the view
+    // models) surfaces these messages rather than a generic bridged NSError string.
+    var errorDescription: String? { description }
 }
 
 private struct ImageRequestInputReferences: Codable {

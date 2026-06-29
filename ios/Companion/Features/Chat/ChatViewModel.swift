@@ -116,7 +116,7 @@ class ChatViewModel: ObservableObject {
             while candidateIndex < chatCandidates.count, isStreaming {
                 let candidate = chatCandidates[candidateIndex]
                 do {
-                    let chatMessages = buildChatMessages(system: systemPrompt, history: messages, newUserText: trimmed)
+                    let chatMessages = buildChatMessages(system: systemPrompt, history: messages)
                     var streamed = ""
                     for try await delta in await client.streamChat(model: candidate.id, messages: chatMessages) {
                         try Task.checkCancellation()
@@ -134,9 +134,13 @@ class ChatViewModel: ObservableObject {
                     break
                 } catch {
                     if !fullReply.isEmpty && retries < maxRetries {
+                        // Dropped mid-stream. OpenRouter has no resume token, so the
+                        // same model is re-streamed from scratch; clear both the
+                        // accumulator and the visible partial so the regenerated reply
+                        // doesn't render on top of stale text.
                         retries += 1
                         isReconnecting = true
-                        messages[msgIndex].text = fullReply
+                        messages[msgIndex].text = ""
                         let delaySeconds = min(pow(2.0, Double(retries - 1)), 4.0)
                         try? await Task.sleep(for: .seconds(delaySeconds))
                         fullReply = ""
@@ -338,12 +342,15 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    private func buildChatMessages(system: String, history: [ChatMessage], newUserText: String) -> [Message] {
+    private func buildChatMessages(system: String, history: [ChatMessage]) -> [Message] {
+        // `history` already contains the just-appended user turn plus the empty
+        // assistant placeholder used for streaming. Skip the placeholder and do NOT
+        // re-append the user text, otherwise the latest turn is sent twice and a
+        // blank assistant message is injected (some providers reject both).
         var msgs = [Message(role: "system", content: system)]
-        for msg in history {
+        for msg in history where !(msg.role == "assistant" && msg.text.isEmpty) {
             msgs.append(Message(role: msg.role, content: msg.text))
         }
-        msgs.append(Message(role: "user", content: newUserText))
         return msgs
     }
 

@@ -42,7 +42,9 @@ struct ContentView: View {
         let store = MemoryStore()
         guard let userId = try? await store.ensureUser() else { return }
 
-        for _ in 0..<5 {
+        // Seeding runs concurrently in CompanionApp; poll for up to ~3s so a cold
+        // launch with a fresh database still resolves a default companion.
+        for _ in 0..<15 {
             if let companions = try? await store.companions(userId: userId), !companions.isEmpty {
                 recentCompanion = companions.first(where: { $0.name == "Riven" }) ?? companions.first
                 return

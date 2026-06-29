@@ -14,9 +14,13 @@ actor CatalogFetcher {
     }
 
     func fetch(apiKey: String) async throws -> [CatalogEntry] {
-        async let chatModels = fetchModels(apiKey: apiKey, path: "\(baseURL)/models")
-        async let imageModels = fetchModels(apiKey: apiKey, path: "\(baseURL)/images/models")
-        return try await chatModels + imageModels
+        // Fetch each endpoint independently so a failure of one (e.g. the optional
+        // image-models endpoint) doesn't discard models successfully fetched from the other.
+        async let chatModels = try? fetchModels(apiKey: apiKey, path: "\(baseURL)/models")
+        async let imageModels = try? fetchModels(apiKey: apiKey, path: "\(baseURL)/images/models")
+        let merged = (await chatModels ?? []) + (await imageModels ?? [])
+        if merged.isEmpty { throw CatalogError.fetchFailed }
+        return merged
     }
 
     private func fetchModels(apiKey: String, path: String) async throws -> [CatalogEntry] {

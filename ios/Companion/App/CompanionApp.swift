@@ -12,9 +12,15 @@ struct CompanionApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Seed companions independently of the network catalog refresh.
+                // Gating seeding behind refreshIfStale() (request timeout up to 15s)
+                // could leave the DB unseeded past ContentView's ~1s default-companion
+                // retry window, so Riven/Atlas wouldn't appear on the Chat tab at launch.
+                .task {
+                    await seedCompanionsAtLaunch()
+                }
                 .task {
                     await catalogChecker.refreshIfStale()
-                    await seedCompanionsAtLaunch()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     Task {
