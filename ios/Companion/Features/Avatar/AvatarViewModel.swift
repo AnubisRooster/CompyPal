@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import SceneKit
+import UIKit
 
 @MainActor
 final class AvatarViewModel: ObservableObject {
