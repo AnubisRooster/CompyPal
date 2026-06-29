@@ -224,6 +224,9 @@ final class SceneKitAvatarController: AvatarController {
             // additive, time-based bone offsets in the skeleton update.
             let duration: TimeInterval
             switch gesture {
+            case .wave: duration = 1.7
+            case .handToChest: duration = 1.1
+            case .shrug: duration = 0.9
             case .shakeHead: duration = 0.9
             case .nod, .laugh: duration = 0.7
             default: duration = 0.6
@@ -399,6 +402,11 @@ final class SceneKitAvatarController: AvatarController {
         recoverMorphTargetNames(from: url)
         resolveGLBBones()
         applyRestPose()
+
+        // Greet with a wave shortly after appearing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.playGesture(.wave)
+        }
     }
 
     // MARK: - GLB skeleton resolution & posing
@@ -895,8 +903,9 @@ final class SceneKitAvatarController: AvatarController {
             glbNextIdleGestureInterval = TimeInterval.random(in: 7...14)
         }
 
-        // Evaluate the transient gesture into bone-space deltas.
+        // Evaluate the transient gesture into bone-space deltas (head/spine + arms).
         var gHeadPitch: Float = 0, gHeadYaw: Float = 0, gHeadRoll: Float = 0, gSpinePitch: Float = 0
+        var armDeltas: [String: SCNVector3] = [:]
         if let ag = activeGesture {
             let p = Float((now - ag.start) / ag.duration)
             if p >= 1 {
@@ -909,7 +918,25 @@ final class SceneKitAvatarController: AvatarController {
                 case .tiltHead, .think: gHeadRoll = 0.26 * env
                 case .leanIn: gSpinePitch = 0.14 * env
                 case .leanBack: gSpinePitch = -0.12 * env
-                case .shrug: gHeadPitch = 0.05 * env; gHeadRoll = 0.1 * env
+                case .wave:
+                    // Raise the right arm up, bend the elbow so the hand is up by the
+                    // head, and swing the upper arm side-to-side to wave hello.
+                    let osc = sin(Float.pi * 6 * p) * 0.22 * env
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.3 * env, 0, -2.0 * env + osc)
+                    armDeltas["rightLowerArm"] = SCNVector3(-1.0 * env, 0, -0.2 * env)
+                    gHeadRoll = 0.08 * env
+                case .shrug:
+                    let up = env
+                    armDeltas["leftUpperArm"] = SCNVector3(0, 0, 0.32 * up)
+                    armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.32 * up)
+                    armDeltas["leftLowerArm"] = SCNVector3(0, 0, 0.25 * up)
+                    armDeltas["rightLowerArm"] = SCNVector3(0, 0, -0.25 * up)
+                    gHeadPitch = 0.06 * up
+                case .handToChest:
+                    let m = env
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.35 * m, 0, -0.45 * m)
+                    armDeltas["rightLowerArm"] = SCNVector3(0, 0, -1.15 * m)
+                    gHeadPitch = 0.05 * m
                 default: gHeadPitch = 0.1 * env
                 }
             }
@@ -939,6 +966,12 @@ final class SceneKitAvatarController: AvatarController {
 
         setBone("leftEye", pitch: gazePitch * 0.5, yaw: gazeYaw * 0.6, roll: 0)
         setBone("rightEye", pitch: gazePitch * 0.5, yaw: gazeYaw * 0.6, roll: 0)
+
+        // Arms hold their relaxed rest pose unless a gesture is driving them.
+        for key in ["leftUpperArm", "rightUpperArm", "leftLowerArm", "rightLowerArm"] {
+            let d = armDeltas[key] ?? SCNVector3Zero
+            setBone(key, pitch: d.x, yaw: d.y, roll: d.z)
+        }
 
         updateGLBBlink(now: now)
     }
