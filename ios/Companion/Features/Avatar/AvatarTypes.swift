@@ -16,6 +16,20 @@ enum Gesture: String, Codable, CaseIterable {
     case idle, nod, shakeHead = "shake_head", tiltHead = "tilt_head"
     case leanIn = "lean_in", leanBack = "lean_back", shrug, wave
     case handToChest = "hand_to_chest", think, laugh
+    // Whole-body and limb movements the avatar can perform on command.
+    case point, stretch, bow, jump, spin, twirl, dance
+
+    /// The movements the companion can actually perform, exposed to the LLM so it only
+    /// claims (and triggers) real abilities. `idle` is excluded as it's not a command.
+    static var performable: [Gesture] {
+        [.wave, .nod, .shakeHead, .tiltHead, .leanIn, .leanBack, .shrug,
+         .point, .stretch, .bow, .jump, .spin, .twirl, .dance, .handToChest, .laugh, .think]
+    }
+
+    /// Pipe-delimited rawValues for embedding in the system prompt.
+    static var promptList: String {
+        performable.map(\.rawValue).joined(separator: ", ")
+    }
 }
 
 enum GazeTarget: String, Codable {

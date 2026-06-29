@@ -177,6 +177,13 @@ final class AvatarViewModel: ObservableObject {
         rebuildProfile()
     }
 
+    // MARK: - Movement commands
+
+    /// Performs a named movement immediately (used for direct user commands like "twirl").
+    func performMovement(_ gesture: Gesture) {
+        gestureSystem.playGesture(gesture)
+    }
+
     // MARK: - Tap handling
 
     func handleTap() {

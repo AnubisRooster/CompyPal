@@ -33,6 +33,26 @@ class ChatViewModel: ObservableObject {
     private var pendingTranscript = ""
     private var streamTask: Task<Void, Never>?
 
+    // Direct movement commands → gesture. Checked most-specific first so multi-word
+    // phrases win over the bare verb. Lets Riven respond instantly, independent of the LLM.
+    private static let movementCommands: [(keywords: [String], gesture: Gesture)] = [
+        (["spin around", "do a spin", "give us a spin", "spin"], .spin),
+        (["twirl"], .twirl),
+        (["take a bow", "bow"], .bow),
+        (["jump", "hop"], .jump),
+        (["dance"], .dance),
+        (["stretch"], .stretch),
+        (["wave", "say hi", "say hello"], .wave),
+        (["shake your head", "shake head"], .shakeHead),
+        (["tilt your head", "tilt head"], .tiltHead),
+        (["nod"], .nod),
+        (["lean in", "lean forward", "come closer"], .leanIn),
+        (["lean back"], .leanBack),
+        (["shrug"], .shrug),
+        (["hand on your heart", "hand on your chest", "hand to chest"], .handToChest),
+        (["point"], .point),
+    ]
+
     private let intentPatterns: [Regex<AnyRegexOutput>] = [
         try! Regex("change (my|the|this) (hair|eye|skin|look|style)"),
         try! Regex("(dye|cut|color|style|change) my (hair|eyebrow)"),
@@ -86,6 +106,10 @@ class ChatViewModel: ObservableObject {
         errorMessage = nil
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         messages.append(ChatMessage(role: "user", text: trimmed))
+
+        // Fire any directly-commanded movement right away so she reacts instantly,
+        // even before the model's reply streams in.
+        handleMovementCommand(trimmed)
 
         isStreaming = true
         avatarViewModel.setThinking(true)
@@ -268,6 +292,16 @@ class ChatViewModel: ObservableObject {
         ttsEngine.stop()
         isSpeaking = false
         avatarViewModel.endSpeaking()
+    }
+
+    @discardableResult
+    private func handleMovementCommand(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        for entry in Self.movementCommands where entry.keywords.contains(where: { lower.contains($0) }) {
+            avatarViewModel.performMovement(entry.gesture)
+            return true
+        }
+        return false
     }
 
     private func hasAppearanceIntent(text: String) -> Bool {

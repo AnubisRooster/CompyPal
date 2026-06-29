@@ -45,6 +45,9 @@ final class SceneKitAvatarController: AvatarController {
         let restPosition: SCNVector3
     }
     private var glbBones: [String: GLBBone] = [:]
+    // Rest transform of the whole model, for whole-body moves (twirl/spin/jump).
+    private var glbRootRestEuler = SCNVector3Zero
+    private var glbRootRestPosition = SCNVector3Zero
 
     // Smoothed gaze (radians), driven toward target each frame.
     private var gazeYaw: Float = 0
@@ -224,8 +227,15 @@ final class SceneKitAvatarController: AvatarController {
             // additive, time-based bone offsets in the skeleton update.
             let duration: TimeInterval
             switch gesture {
+            case .dance: duration = 3.2
+            case .stretch: duration = 1.6
+            case .twirl: duration = 1.6
             case .wave: duration = 1.7
+            case .spin: duration = 1.4
+            case .point: duration = 1.4
+            case .bow: duration = 1.3
             case .handToChest: duration = 1.1
+            case .jump: duration = 0.9
             case .shrug: duration = 0.9
             case .shakeHead: duration = 0.9
             case .nod, .laugh: duration = 0.7
@@ -259,6 +269,9 @@ final class SceneKitAvatarController: AvatarController {
                 bone.node.eulerAngles = bone.restEuler
                 bone.node.position = bone.restPosition
             }
+            activeGesture = nil
+            glbRootNode?.eulerAngles = glbRootRestEuler
+            glbRootNode?.position = glbRootRestPosition
         }
     }
 
@@ -440,6 +453,11 @@ final class SceneKitAvatarController: AvatarController {
         add("rightLowerArm", "J_Bip_R_LowerArm")
         add("leftHand", "J_Bip_L_Hand")
         add("rightHand", "J_Bip_R_Hand")
+
+        if let root = glbRootNode {
+            glbRootRestEuler = root.eulerAngles
+            glbRootRestPosition = root.position
+        }
 
         avatarLog.info("Resolved GLB bones: \(self.glbBones.keys.sorted().joined(separator: ", "))")
     }
@@ -903,39 +921,67 @@ final class SceneKitAvatarController: AvatarController {
             glbNextIdleGestureInterval = TimeInterval.random(in: 7...14)
         }
 
-        // Evaluate the transient gesture into bone-space deltas (head/spine + arms).
+        // Evaluate the transient gesture into additive deltas: head/spine bones, arm
+        // bones, and a whole-body root transform (yaw/lift). Whole-body moves rotate or
+        // lift the entire rigged model, which reads cleanly without per-joint tuning.
         var gHeadPitch: Float = 0, gHeadYaw: Float = 0, gHeadRoll: Float = 0, gSpinePitch: Float = 0
         var armDeltas: [String: SCNVector3] = [:]
+        var rootYaw: Float = 0
+        var rootLift: Float = 0
         if let ag = activeGesture {
             let p = Float((now - ag.start) / ag.duration)
             if p >= 1 {
                 activeGesture = nil
             } else {
-                let env = sin(Float.pi * p)
+                let env = sin(Float.pi * p)        // 0→1→0 for there-and-back moves
+                let turn = p * p * (3 - 2 * p)      // smoothstep 0→1 for one-way spins
                 switch ag.gesture {
                 case .nod, .laugh: gHeadPitch = 0.22 * env
                 case .shakeHead: gHeadYaw = sin(Float.pi * 2 * p) * 0.25
                 case .tiltHead, .think: gHeadRoll = 0.26 * env
                 case .leanIn: gSpinePitch = 0.14 * env
                 case .leanBack: gSpinePitch = -0.12 * env
+                case .bow:
+                    gSpinePitch = 0.55 * env
+                    gHeadPitch = 0.3 * env
+                case .twirl:
+                    rootYaw = turn * Float.pi * 2
+                    armDeltas["leftUpperArm"] = SCNVector3(0, 0, 0.5 * env)
+                    armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.5 * env)
+                case .spin:
+                    rootYaw = turn * Float.pi * 2
+                case .jump:
+                    rootLift = sin(Float.pi * p) * 0.55
+                    gSpinePitch = -0.06 * env
+                case .dance:
+                    rootYaw = sin(Float.pi * 4 * p) * 0.35
+                    rootLift = abs(sin(Float.pi * 4 * p)) * 0.12
+                    gHeadRoll = sin(Float.pi * 4 * p) * 0.15
+                    armDeltas["leftUpperArm"] = SCNVector3(0, 0, 0.4 + sin(Float.pi * 4 * p) * 0.3)
+                    armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.4 - sin(Float.pi * 4 * p) * 0.3)
+                case .point:
+                    // Straight arm extended out/forward — a clean point (no elbow fold).
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.9 * env, 0, -1.0 * env)
+                case .stretch:
+                    // Both arms reach overhead.
+                    armDeltas["leftUpperArm"] = SCNVector3(-0.2 * env, 0, 2.5 * env)
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.2 * env, 0, -2.5 * env)
+                    gSpinePitch = -0.08 * env
                 case .wave:
-                    // Raise the right arm up, bend the elbow so the hand is up by the
-                    // head, and swing the upper arm side-to-side to wave hello.
-                    let osc = sin(Float.pi * 6 * p) * 0.22 * env
-                    armDeltas["rightUpperArm"] = SCNVector3(-0.3 * env, 0, -2.0 * env + osc)
-                    armDeltas["rightLowerArm"] = SCNVector3(-1.0 * env, 0, -0.2 * env)
-                    gHeadRoll = 0.08 * env
+                    // Raise a near-straight arm up and swing it. The earlier elbow fold
+                    // rotated the forearm on the wrong axis and looked broken, so the
+                    // elbow now stays relaxed.
+                    let swing = sin(Float.pi * 8 * p) * 0.28 * env
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.25 * env, 0, -1.95 * env + swing)
+                    gHeadRoll = 0.06 * env
                 case .shrug:
                     let up = env
                     armDeltas["leftUpperArm"] = SCNVector3(0, 0, 0.32 * up)
                     armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.32 * up)
-                    armDeltas["leftLowerArm"] = SCNVector3(0, 0, 0.25 * up)
-                    armDeltas["rightLowerArm"] = SCNVector3(0, 0, -0.25 * up)
                     gHeadPitch = 0.06 * up
                 case .handToChest:
                     let m = env
-                    armDeltas["rightUpperArm"] = SCNVector3(-0.35 * m, 0, -0.45 * m)
-                    armDeltas["rightLowerArm"] = SCNVector3(0, 0, -1.15 * m)
+                    armDeltas["rightUpperArm"] = SCNVector3(-0.45 * m, 0, -0.55 * m)
                     gHeadPitch = 0.05 * m
                 default: gHeadPitch = 0.1 * env
                 }
@@ -971,6 +1017,16 @@ final class SceneKitAvatarController: AvatarController {
         for key in ["leftUpperArm", "rightUpperArm", "leftLowerArm", "rightLowerArm"] {
             let d = armDeltas[key] ?? SCNVector3Zero
             setBone(key, pitch: d.x, yaw: d.y, roll: d.z)
+        }
+
+        // Whole-body movement: rotate/lift the entire model from its rest transform.
+        if let root = glbRootNode {
+            root.eulerAngles = SCNVector3(glbRootRestEuler.x,
+                                          glbRootRestEuler.y + rootYaw,
+                                          glbRootRestEuler.z)
+            root.position = SCNVector3(glbRootRestPosition.x,
+                                       glbRootRestPosition.y + rootLift,
+                                       glbRootRestPosition.z)
         }
 
         updateGLBBlink(now: now)
