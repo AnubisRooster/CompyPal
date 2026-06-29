@@ -301,4 +301,34 @@ struct AvatarTests {
         #expect(mapping.blink.left == "Fcl_EYE_Close_L")
         #expect(mapping.blink.right == "Fcl_EYE_Close_R")
     }
+
+    // MARK: - TTSEngine concatenation edge cases
+
+    @Test func concatenateNonFloat32FormatReturnsFirstBuffer() throws {
+        let intFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 22050, channels: 1, interleaved: false)!
+        let b1 = AVAudioPCMBuffer(pcmFormat: intFormat, frameCapacity: 100)!
+        b1.frameLength = 100
+        let b2 = AVAudioPCMBuffer(pcmFormat: intFormat, frameCapacity: 50)!
+        b2.frameLength = 50
+        let result = TTSEngine.concatenateBuffers([b1, b2])
+        #expect(result === b1, "Non-float32 format should return first buffer")
+    }
+
+    @Test func computePCMEnergiesNonFloat32ReturnsEmpty() throws {
+        let intFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 22050, channels: 1, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: intFormat, frameCapacity: 1024)!
+        buffer.frameLength = 1024
+        let energies = TTSEngine.computePCMEnergies(buffer)
+        #expect(energies.isEmpty)
+    }
+
+    @Test func computePCMEnergiesPartialBuffer() throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 22050, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!
+        buffer.frameLength = 500
+        let channelData = buffer.floatChannelData![0]
+        for i in 0..<500 { channelData[i] = i < 250 ? 0 : 1.0 }
+        let energies = TTSEngine.computePCMEnergies(buffer)
+        #expect(!energies.isEmpty)
+    }
 }

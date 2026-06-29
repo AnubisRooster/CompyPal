@@ -5,22 +5,37 @@ actor DatabaseManager {
     static let shared = DatabaseManager()
 
     private var dbQueue: DatabaseQueue?
+    // inMemory flag control — true: use in-memory DatabaseQueue; false: default disk-based
+    private let useInMemory: Bool
+
+    init(inMemory: Bool = false) {
+        self.useInMemory = inMemory
+    }
 
     func open() throws -> DatabaseQueue {
         if let queue = dbQueue { return queue }
-        let dir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let dbURL = dir.appendingPathComponent("companion.sqlite")
-        var config = Configuration()
-        config.prepareDatabase { db in
-            try db.execute(sql: "PRAGMA journal_mode=WAL")
+        let queue: DatabaseQueue
+        if useInMemory {
+            var config = Configuration()
+            config.prepareDatabase { db in
+                try db.execute(sql: "PRAGMA journal_mode=MEMORY")
+            }
+            queue = try DatabaseQueue(configuration: config)
+        } else {
+            let dir = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let dbURL = dir.appendingPathComponent("companion.sqlite")
+            var config = Configuration()
+            config.prepareDatabase { db in
+                try db.execute(sql: "PRAGMA journal_mode=WAL")
+            }
+            queue = try DatabaseQueue(path: dbURL.path, configuration: config)
         }
-        let queue = try DatabaseQueue(path: dbURL.path, configuration: config)
-        try runMigrations(queue)
+        try Self.runMigrations(queue)
         dbQueue = queue
         return queue
     }
 
-    private func runMigrations(_ db: DatabaseQueue) throws {
+    nonisolated static func runMigrations(_ db: DatabaseQueue) throws {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1_initial") { db in
             try db.create(table: "user") { t in
