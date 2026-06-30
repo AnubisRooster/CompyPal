@@ -117,6 +117,9 @@ struct ChatView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($isFocused)
                 .disabled(viewModel.isListening)
+                .onChange(of: inputText) { _ in
+                    viewModel.avatarViewModel.onInputChanged(inputText)
+                }
 
             if viewModel.isStreaming {
                 Button("Cancel") { viewModel.cancelStream() }

@@ -184,6 +184,26 @@ final class AvatarViewModel: ObservableObject {
         gestureSystem.playGesture(gesture)
     }
 
+    private var lastTypingReaction: TimeInterval = 0
+
+    /// Live reaction while the user is composing a message: hold attentive eye contact and
+    /// give an occasional small nod, so Riven feels like she's listening as you type. Idle
+    /// life stays on, so her face keeps breathing. Cleared input releases the eye contact.
+    func onInputChanged(_ text: String) {
+        guard !isSpeaking else { return }
+        let hasText = !text.trimmingCharacters(in: .whitespaces).isEmpty
+        if hasText {
+            gazeSystem.overrideGaze(.user)
+            let now = CACurrentMediaTime()
+            if now - lastTypingReaction > 3.5 {
+                lastTypingReaction = now
+                gestureSystem.playGesture(.nod)
+            }
+        } else {
+            gazeSystem.overrideGaze(nil)
+        }
+    }
+
     /// A brief attentive reaction when the user sends a message: look over, warm up, and
     /// give a small acknowledging nod, then settle back unless a reply has started.
     func reactToUserMessage() {

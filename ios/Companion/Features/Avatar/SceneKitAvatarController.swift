@@ -62,6 +62,16 @@ final class SceneKitAvatarController: AvatarController {
         let duration: TimeInterval
     }
     private var activeGesture: ActiveGesture?
+
+    // Real animation clips discovered in the GLB (and any sidecar `anim_*.glb` files that
+    // share the VRM skeleton). VRoid exports ship none, so this is usually empty and
+    // gestures fall back to the procedural system; when a matching clip exists it is
+    // preferred for higher-fidelity motion and drives the skeleton directly.
+    private var clipPlayers: [String: SCNAnimationPlayer] = [:]
+    private var isClipPlaying = false
+    private var clipEndWork: DispatchWorkItem?
+    var availableClipNames: [String] { clipPlayers.keys.sorted() }
+
     private var appearanceColorMap: [String: UIColor] = [:]
     private var morpherIndex: [String: [(morpher: SCNMorpher, targetIndex: Int)]] = [:]
     var morpherIndexCount: Int { morpherIndex.values.reduce(0) { $0 + $1.count } }
@@ -224,8 +234,14 @@ final class SceneKitAvatarController: AvatarController {
 
     func playGesture(_ gesture: Gesture) {
         if hasGLB {
-            // No animation clips ship with the VRM, so gestures are generated as
-            // additive, time-based bone offsets in the skeleton update.
+            // Prefer a real animation clip when one is available for this gesture; it
+            // drives the skeleton directly for higher fidelity than procedural offsets.
+            if let clipKey = resolveClipKey(for: gesture) {
+                playClip(key: clipKey)
+                return
+            }
+            // Otherwise gestures are generated as additive, time-based bone offsets in
+            // the skeleton update (VRoid exports ship no clips).
             let duration: TimeInterval
             switch gesture {
             case .dance: duration = 3.2
@@ -272,6 +288,9 @@ final class SceneKitAvatarController: AvatarController {
             }
             activeGesture = nil
             glbExprFlicker = nil
+            clipEndWork?.cancel()
+            isClipPlaying = false
+            clipPlayers.values.forEach { $0.stop() }
             for key in currentEmotionMorphs.keys { setMorphWeight(named: key, weight: 0) }
             currentEmotionMorphs.removeAll()
             glbRootNode?.eulerAngles = glbRootRestEuler
@@ -419,6 +438,7 @@ final class SceneKitAvatarController: AvatarController {
         recoverMorphTargetNames(from: url)
         resolveGLBBones()
         applyRestPose()
+        loadAnimationClips(from: source, glbURL: url)
 
         // Greet with a wave shortly after appearing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -806,8 +826,82 @@ final class SceneKitAvatarController: AvatarController {
         }
     }
 
-    private func playAnimationClip(named name: String) {
-        // Animation clip playback requires SCNAnimationPlayer from the GLB scene
+    // MARK: - Animation clips
+
+    /// Collects animation clips from the avatar GLB and any sidecar `anim_*.glb` files in
+    /// the bundle, keying each `SCNAnimationPlayer` by a lowercased name. Clips that share
+    /// the VRM skeleton (same bone names) animate the loaded character directly.
+    private func loadAnimationClips(from source: GLTFSCNSceneSource, glbURL: URL) {
+        clipPlayers.removeAll()
+        registerClips(source.animations)
+
+        let sidecars = (Bundle.main.urls(forResourcesWithExtension: "glb", subdirectory: nil) ?? [])
+            .filter { $0.lastPathComponent.lowercased().hasPrefix("anim_") }
+        for fileURL in sidecars {
+            guard let asset = try? GLTFAsset(url: fileURL, options: [:]) else { continue }
+            let base = fileURL.deletingPathExtension().lastPathComponent
+                .replacingOccurrences(of: "anim_", with: "", options: [.caseInsensitive, .anchored])
+            registerClips(GLTFSCNSceneSource(asset: asset).animations, fallbackName: base)
+        }
+
+        if clipPlayers.isEmpty {
+            avatarLog.info("No animation clips found; gestures use procedural motion.")
+        } else {
+            avatarLog.info("Loaded animation clips: \(self.availableClipNames.joined(separator: ", "))")
+        }
+    }
+
+    private func registerClips(_ anims: [GLTFSCNAnimation], fallbackName: String? = nil) {
+        guard let root = glbRootNode else { return }
+        for (i, anim) in anims.enumerated() {
+            let rawName = anim.name.isEmpty ? (fallbackName ?? "clip_\(i)") : anim.name
+            let key = rawName.lowercased()
+            let player = anim.animationPlayer
+            player.stop()
+            player.animation.repeatCount = 1
+            player.animation.isRemovedOnCompletion = false
+            root.addAnimationPlayer(player, forKey: key)
+            clipPlayers[key] = player
+        }
+    }
+
+    /// Returns the clip key to play for a gesture, preferring an explicit RigMapping
+    /// `gestures` entry and falling back to a clip named after the gesture itself.
+    private func resolveClipKey(for gesture: Gesture) -> String? {
+        if let mapped = rigMapping?.gestures[gesture.rawValue]?.lowercased(), clipPlayers[mapped] != nil {
+            return mapped
+        }
+        let raw = gesture.rawValue.lowercased()
+        return clipPlayers[raw] != nil ? raw : nil
+    }
+
+    private func playClip(key: String) {
+        guard let player = clipPlayers[key] else { return }
+        clipEndWork?.cancel()
+        activeGesture = nil
+        restoreRestPose()
+        isClipPlaying = true
+        player.stop()
+        player.play()
+
+        let duration = player.animation.duration > 0 ? player.animation.duration : 1.0
+        let work = DispatchWorkItem { [weak self] in
+            self?.isClipPlaying = false
+            self?.restoreRestPose()
+        }
+        clipEndWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+
+    /// Snaps every tracked bone and the root back to their captured rest transforms so
+    /// procedural motion resumes cleanly after a clip (or is reset on Reduce Motion).
+    private func restoreRestPose() {
+        for (_, bone) in glbBones {
+            bone.node.eulerAngles = bone.restEuler
+            bone.node.position = bone.restPosition
+        }
+        glbRootNode?.eulerAngles = glbRootRestEuler
+        glbRootNode?.position = glbRootRestPosition
     }
 
     // MARK: - Gaze
@@ -921,6 +1015,15 @@ final class SceneKitAvatarController: AvatarController {
     private func updateGLBSkeleton(_ dt: TimeInterval) {
         guard hasGLB, !reduceMotion else { return }
         let now = CACurrentMediaTime()
+
+        // While a real animation clip is playing it owns the skeleton; only keep the
+        // face and blinking alive so procedural bone writes don't fight the clip.
+        if isClipPlaying {
+            updateGLBFace(dt, now: now)
+            updateGLBBlink(now: now)
+            return
+        }
+
         let idleAmp: Float = isIdleEnabled ? 1 : 0
 
         glbBreathePhase += Float(dt) * 1.5
@@ -947,12 +1050,14 @@ final class SceneKitAvatarController: AvatarController {
         gazePitch += (targetGazePitch + glbGazeDriftPitch - gazePitch) * lerp
 
         // Occasionally play a small idle gesture so resting isn't perfectly static.
+        // The pool and cadence are tinted by the current emotion so a happy Riven
+        // fidgets more brightly and a thoughtful one settles down.
         if idleAmp > 0, activeGesture == nil, now - glbLastIdleGesture > glbNextIdleGestureInterval {
-            let idleGestures: [Gesture] = [.tiltHead, .nod, .leanBack]
-            activeGesture = ActiveGesture(gesture: idleGestures.randomElement() ?? .tiltHead,
+            let pool = idleGesturePool(for: currentEmotion)
+            activeGesture = ActiveGesture(gesture: pool.randomElement() ?? .tiltHead,
                                           start: now, duration: 0.8)
             glbLastIdleGesture = now
-            glbNextIdleGestureInterval = TimeInterval.random(in: 7...14)
+            glbNextIdleGestureInterval = idleGestureInterval(for: currentEmotion)
         }
 
         // Evaluate the transient gesture into additive deltas: head/spine bones, arm
@@ -1067,6 +1172,42 @@ final class SceneKitAvatarController: AvatarController {
         updateGLBBlink(now: now)
     }
 
+    /// Idle micro-gestures appropriate to the current mood.
+    private func idleGesturePool(for emotion: Emotion) -> [Gesture] {
+        switch emotion {
+        case .happy, .playful: return [.nod, .tiltHead, .laugh, .shrug]
+        case .warm, .affectionate: return [.tiltHead, .nod, .handToChest]
+        case .surprised: return [.nod, .tiltHead]
+        case .sad: return [.leanBack, .tiltHead]
+        case .thoughtful: return [.think, .tiltHead, .leanBack]
+        case .concerned: return [.tiltHead, .leanBack]
+        case .neutral: return [.tiltHead, .nod, .leanBack]
+        }
+    }
+
+    /// How long to wait between idle micro-gestures — livelier moods fidget more often.
+    private func idleGestureInterval(for emotion: Emotion) -> TimeInterval {
+        switch emotion {
+        case .happy, .playful: return TimeInterval.random(in: 4...8)
+        case .sad, .thoughtful: return TimeInterval.random(in: 10...18)
+        default: return TimeInterval.random(in: 7...14)
+        }
+    }
+
+    /// Candidate spontaneous facial flickers appropriate to the current mood.
+    private func exprFlickerOptions(for emotion: Emotion) -> [[String: Float]] {
+        switch emotion {
+        case .happy, .playful, .warm, .affectionate:
+            return [["Fcl_MTH_Joy": 0.3, "Fcl_EYE_Joy": 0.25], ["Fcl_BRW_Fun": 0.3, "Fcl_MTH_Fun": 0.25]]
+        case .sad:
+            return [["Fcl_BRW_Sorrow": 0.3, "Fcl_EYE_Sorrow": 0.2]]
+        case .thoughtful, .concerned:
+            return [["Fcl_BRW_Sorrow": 0.25], ["Fcl_BRW_Angry": 0.2]]
+        case .surprised, .neutral:
+            return [["Fcl_BRW_Surprised": 0.35, "Fcl_EYE_Surprised": 0.12], ["Fcl_MTH_Joy": 0.22, "Fcl_EYE_Joy": 0.18]]
+        }
+    }
+
     /// Drives facial blend shapes every frame so the expression is alive: the held
     /// emotion eases toward its target, a slow ambient brow motion keeps a neutral face
     /// from looking frozen, and occasional flickers add spontaneity. All ambient motion
@@ -1079,13 +1220,9 @@ final class SceneKitAvatarController: AvatarController {
         glbFaceBrowPhase += Float(dt) * 0.7
         let browAmbient = (sin(glbFaceBrowPhase) * 0.5 + 0.5) * 0.07 * ambientAmp
 
-        // Occasionally trigger a brief spontaneous expression.
+        // Occasionally trigger a brief spontaneous expression, flavored by current mood.
         if ambientAmp > 0, glbExprFlicker == nil, now - glbLastExprFlicker > glbNextExprFlickerInterval {
-            let options: [[String: Float]] = [
-                ["Fcl_BRW_Surprised": 0.35, "Fcl_EYE_Surprised": 0.12],
-                ["Fcl_MTH_Joy": 0.25, "Fcl_EYE_Joy": 0.2],
-                ["Fcl_BRW_Fun": 0.3, "Fcl_MTH_Fun": 0.2],
-            ]
+            let options = exprFlickerOptions(for: currentEmotion)
             glbExprFlicker = ExprFlicker(start: now,
                                          dur: TimeInterval.random(in: 0.6...1.1),
                                          morphs: options.randomElement() ?? [:])
