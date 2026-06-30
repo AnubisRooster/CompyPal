@@ -23,6 +23,8 @@ class ChatViewModel: ObservableObject {
     private let keychain = KeychainService()
     private let catalogCache = CatalogCache()
     private let ttsEngine = TTSEngine()
+    private let elevenLabs = ElevenLabsTTS()
+    private var elevenLabsKey: String?
     private let audioRecorder = AudioRecorderService()
     private let appearanceParser: AppearanceIntentParser
     private let appearanceApplier: AppearanceApplier
@@ -257,6 +259,46 @@ class ChatViewModel: ObservableObject {
         try? session.setCategory(.playback, mode: .default)
         try? session.setActive(true)
 
+        // Prefer the realistic ElevenLabs voice when enabled and configured; fall back to the
+        // on-device Apple voice automatically if it's disabled, unconfigured, or errors out.
+        let cloudEnabled = UserDefaults.standard.bool(forKey: "cloud_voice_enabled")
+        if cloudEnabled, let key = elevenLabsKey, ElevenLabsTTS.isValidKey(key) {
+            speakWithElevenLabs(text, track: track, key: key)
+            return
+        }
+        speakWithApple(text, track: track)
+    }
+
+    private func speakWithElevenLabs(_ text: String, track: PerformanceTrack?, key: String) {
+        let voiceId = UserDefaults.standard.string(forKey: "eleven_voice_id") ?? ElevenLabsTTS.defaultVoiceId
+        let rate = UserDefaults.standard.object(forKey: "tts_rate") as? Double ?? 0.5
+        elevenLabs.speak(
+            text,
+            voiceId: voiceId,
+            modelId: ElevenLabsTTS.defaultModelId,
+            apiKey: key,
+            rate: 0.6 + rate, // map 0.25–1.0 slider onto a natural 0.85–1.6 playback range
+            onStart: { [weak self] energies, duration in
+                guard let self else { return }
+                self.avatarViewModel.beginSpeaking(text: text, track: track)
+                self.isSpeaking = true
+                self.avatarViewModel.setPCMEnergies(energies, duration: duration)
+            },
+            onProgress: { [weak self] range in
+                self?.avatarViewModel.updateSpeechRange(characterRange: range, text: text)
+            },
+            completion: { [weak self] in
+                self?.isSpeaking = false
+                self?.avatarViewModel.endSpeaking()
+            },
+            onError: { [weak self] _ in
+                // Network/auth/quota failure — degrade gracefully to the offline voice.
+                self?.speakWithApple(text, track: track)
+            }
+        )
+    }
+
+    private func speakWithApple(_ text: String, track: PerformanceTrack? = nil) {
         let voiceId = companion.voiceId ?? VoicePicker.selectVoice()
         var hasStarted = false
 
@@ -292,6 +334,7 @@ class ChatViewModel: ObservableObject {
 
     func stopSpeaking() {
         ttsEngine.stop()
+        elevenLabs.stop()
         isSpeaking = false
         avatarViewModel.endSpeaking()
     }
@@ -374,6 +417,8 @@ class ChatViewModel: ObservableObject {
         } else {
             hasApiKey = false
         }
+        // Cache the ElevenLabs key (if any) so the synchronous speak path can use it.
+        elevenLabsKey = try? await keychain.read(key: ElevenLabsTTS.keychainAccount)
     }
 
     private func loadChatCandidates() async {

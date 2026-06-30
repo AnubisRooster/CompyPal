@@ -13,10 +13,18 @@ struct SettingsView: View {
     @AppStorage("tts_rate") private var ttsRate: Double = 0.5
     @AppStorage("has_onboarded") private var hasOnboarded = false
     @AppStorage("pinned_model_id") private var pinnedModelId = ""
+    @AppStorage("cloud_voice_enabled") private var cloudVoiceEnabled = false
+    @AppStorage("eleven_voice_id") private var elevenVoiceId = ElevenLabsTTS.defaultVoiceId
 
     @State private var catalogEntries: [CatalogEntry] = []
     @State private var catalogStatus: String?
     @State private var isRefreshing = false
+
+    @State private var elevenKey = ""
+    @State private var elevenKeySaved = false
+    @State private var elevenStatus: String?
+    @State private var elevenVoices: [ElevenLabsTTS.Voice] = []
+    @State private var isLoadingVoices = false
 
     private let keychain = KeychainService()
     private let catalogCache = CatalogCache()
@@ -108,6 +116,47 @@ struct SettingsView: View {
                     .accessibilityValue("\(Int(ttsRate * 100)) percent")
                 }
 
+                Section {
+                    Toggle("Use Realistic Voice (ElevenLabs)", isOn: $cloudVoiceEnabled)
+
+                    SecureField("ElevenLabs API key", text: $elevenKey)
+                        .textContentType(.password)
+                        .autocorrectionDisabled()
+
+                    if elevenKeySaved {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                            Text("ElevenLabs key configured").foregroundColor(.secondary)
+                        }
+                    }
+
+                    Button("Save Voice Key") { saveElevenKey() }
+                        .disabled(elevenKey.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    if isLoadingVoices {
+                        HStack { ProgressView(); Text("Loading voices…").foregroundColor(.secondary) }
+                    } else {
+                        Button("Load Voices") { Task { await loadElevenVoices() } }
+                            .disabled(!elevenKeySaved)
+                    }
+
+                    if !elevenVoices.isEmpty {
+                        Picker("Voice", selection: $elevenVoiceId) {
+                            ForEach(elevenVoices) { voice in
+                                Text(voice.name).tag(voice.id)
+                            }
+                        }
+                    }
+
+                    if let status = elevenStatus {
+                        Text(status).font(.caption).foregroundColor(.secondary)
+                    }
+                } header: {
+                    Text("Realistic Voice")
+                } footer: {
+                    Text("A neural voice that sounds far more lifelike than the built-in one. Requires an ElevenLabs API key and uses your ElevenLabs quota. When off (or offline), the on-device voice is used.")
+                }
+
                 Section("Image Generation") {
                     Toggle("Enable Image Generation", isOn: $imageGenEnabled)
                 }
@@ -190,6 +239,45 @@ struct SettingsView: View {
     private func loadCachedCatalog() async {
         if let cached = await catalogCache.load(), !cached.entries.isEmpty {
             catalogEntries = cached.entries
+        }
+        if let key = try? await keychain.read(key: ElevenLabsTTS.keychainAccount), !key.isEmpty {
+            elevenKey = key
+            elevenKeySaved = true
+        }
+    }
+
+    private func saveElevenKey() {
+        let trimmed = elevenKey.trimmingCharacters(in: .whitespaces)
+        guard ElevenLabsTTS.isValidKey(trimmed) else {
+            elevenStatus = "That doesn't look like a valid ElevenLabs key."
+            return
+        }
+        Task {
+            do {
+                try await keychain.store(key: ElevenLabsTTS.keychainAccount, value: trimmed)
+                elevenKeySaved = true
+                elevenStatus = "Voice key saved securely."
+                await loadElevenVoices()
+            } catch {
+                elevenStatus = "Failed to save key: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func loadElevenVoices() async {
+        let key = elevenKey.trimmingCharacters(in: .whitespaces)
+        guard ElevenLabsTTS.isValidKey(key) else { return }
+        isLoadingVoices = true
+        defer { isLoadingVoices = false }
+        do {
+            let voices = try await ElevenLabsTTS.fetchVoices(apiKey: key)
+            elevenVoices = voices
+            if !voices.contains(where: { $0.id == elevenVoiceId }), let first = voices.first {
+                elevenVoiceId = first.id
+            }
+            elevenStatus = "Loaded \(voices.count) voices."
+        } catch {
+            elevenStatus = "Could not load voices: \(error.localizedDescription)"
         }
     }
 

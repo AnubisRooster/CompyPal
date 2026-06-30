@@ -199,9 +199,17 @@ final class SceneKitAvatarController: AvatarController {
             case .sil: jawAngle = 0
             }
             animateJaw(open: jawAngle)
+            setMorphWeight(named: visemeName, weight: weight)
+            return
         }
 
-        setMorphWeight(named: visemeName, weight: weight)
+        // GLB: don't write the morph directly. Stash the target so updateGLBFace can ease
+        // toward it and, critically, release every *other* mouth viseme — otherwise each
+        // frame's shape stacks on the last and the mouth turns into a garbled blend.
+        if glbVisemeMorphNames.isEmpty, let m = rigMapping {
+            glbVisemeMorphNames = Array(Set(m.visemes.values))
+        }
+        glbVisemeTarget = (viseme == .sil || weight < 0.04) ? nil : (visemeName, min(weight, 1))
     }
 
     func setEmotion(_ emotion: Emotion, intensity: Float, blendDuration: TimeInterval) {
@@ -297,6 +305,9 @@ final class SceneKitAvatarController: AvatarController {
             clipPlayers.values.forEach { $0.stop() }
             for key in currentEmotionMorphs.keys { setMorphWeight(named: key, weight: 0) }
             currentEmotionMorphs.removeAll()
+            for key in glbCurrentVisemeWeights.keys { setMorphWeight(named: key, weight: 0) }
+            glbCurrentVisemeWeights.removeAll()
+            glbVisemeTarget = nil
             glbRootNode?.eulerAngles = glbRootRestEuler
             glbRootNode?.position = glbRootRestPosition
         }
@@ -1009,7 +1020,12 @@ final class SceneKitAvatarController: AvatarController {
     // face never looks frozen.
     private var targetEmotionMorphs: [String: Float] = [:]
     private var currentEmotionMorphs: [String: Float] = [:]
-    private var glbFaceBrowPhase: Float = 0
+        private var glbFaceBrowPhase: Float = 0
+        // Lip-sync: a single mouth channel. The energy sampler sets the active viseme each
+        // frame; updateGLBFace eases toward it and zeroes the rest so shapes never stack.
+        private var glbVisemeMorphNames: [String] = []
+        private var glbVisemeTarget: (name: String, weight: Float)?
+        private var glbCurrentVisemeWeights: [String: Float] = [:]
     private var glbLastExprFlicker: TimeInterval = 0
     private var glbNextExprFlickerInterval: TimeInterval = 5
     private struct ExprFlicker { let start: TimeInterval; let dur: TimeInterval; let morphs: [String: Float] }
@@ -1165,13 +1181,13 @@ final class SceneKitAvatarController: AvatarController {
                     armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.32 * up)
                     gHeadPitch = 0.06 * up
                 case .handToChest:
-                    // Raise the upper arm via Z (the axis that actually elevates the arm
-                    // after the rest-pose rotation), then fold the elbow inward so the
-                    // hand comes up across to the chest rather than resting on the hip.
+                    // Keep the elbow low at the side and flex the forearm forward-and-up
+                    // (+X = anatomical forward flex) so the hand rises across to the chest.
+                    // The elbow must NOT hyperextend backward (−X), which reads as broken.
                     let m = sin(Float.pi * min(p * 1.4, 1))
-                    armDeltas["rightUpperArm"] = SCNVector3(-0.3 * m, 0, -1.4 * m)
-                    armDeltas["rightLowerArm"] = SCNVector3(-1.5 * m, 0.4 * m, 0)
-                    gHeadPitch = 0.06 * m
+                    armDeltas["rightUpperArm"] = SCNVector3(0, 0, -0.3 * m)
+                    armDeltas["rightLowerArm"] = SCNVector3(1.75 * m, -0.25 * m, 0)
+                    gHeadPitch = 0.05 * m
                 default: gHeadPitch = 0.1 * env
                 }
             }
@@ -1308,6 +1324,27 @@ final class SceneKitAvatarController: AvatarController {
             } else {
                 currentEmotionMorphs[key] = next
                 setMorphWeight(named: key, weight: min(next, 1))
+            }
+        }
+
+        // Lip-sync mouth: ease toward the active viseme and release every other mouth shape
+        // so consecutive frames blend smoothly instead of snapping or stacking. A faster
+        // lerp than the emotion layer keeps speech crisp.
+        if !glbVisemeMorphNames.isEmpty {
+            let mouthLerp = min(Float(dt) * 16, 1)
+            let activeName = glbVisemeTarget?.name
+            let activeWeight = glbVisemeTarget?.weight ?? 0
+            for name in glbVisemeMorphNames {
+                let target = (name == activeName) ? activeWeight : 0
+                let cur = glbCurrentVisemeWeights[name] ?? 0
+                let next = cur + (target - cur) * mouthLerp
+                if abs(next) < 0.004 {
+                    if cur != 0 { setMorphWeight(named: name, weight: 0) }
+                    glbCurrentVisemeWeights[name] = nil
+                } else {
+                    glbCurrentVisemeWeights[name] = next
+                    setMorphWeight(named: name, weight: min(next, 1))
+                }
             }
         }
     }
