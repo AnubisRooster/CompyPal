@@ -107,9 +107,11 @@ class ChatViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         messages.append(ChatMessage(role: "user", text: trimmed))
 
-        // Fire any directly-commanded movement right away so she reacts instantly,
-        // even before the model's reply streams in.
-        handleMovementCommand(trimmed)
+        // React instantly: play a directly-commanded movement if present, otherwise a
+        // brief attentive "perk up" so she acknowledges the message before the reply.
+        if !handleMovementCommand(trimmed) {
+            avatarViewModel.reactToUserMessage()
+        }
 
         isStreaming = true
         avatarViewModel.setThinking(true)

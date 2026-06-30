@@ -198,26 +198,27 @@ final class SceneKitAvatarController: AvatarController {
         currentEmotion = emotion
         currentEmotionIntensity = intensity
 
+        if hasGLB {
+            // Store the desired expression; updateGLBFace eases the VRM blend shapes
+            // toward it every frame so transitions are smooth and the face stays held
+            // (rather than snapping once via a one-shot animation).
+            var target: [String: Float] = [:]
+            if let mapping = rigMapping, let morphs = mapping.emotions[emotion.rawValue] {
+                for (morphName, baseWeight) in morphs {
+                    target[morphName] = baseWeight * intensity
+                }
+            }
+            targetEmotionMorphs = target
+            return
+        }
+
         SCNTransaction.begin()
         SCNTransaction.animationDuration = blendDuration
-
-        if hasGLB, let mapping = rigMapping, let morphs = mapping.emotions[emotion.rawValue] {
-            // Use VRM blend shapes from rig mapping
-            for (morphName, baseWeight) in morphs {
-                setMorphWeight(named: morphName, weight: baseWeight * intensity)
-            }
-        } else {
-            // Fall back to ARKit-style morph names
-            let weights = emotion.arkitWeights()
-            for (morphName, baseWeight) in weights.morphs {
-                setMorphWeight(named: morphName, weight: baseWeight * intensity)
-            }
+        let weights = emotion.arkitWeights()
+        for (morphName, baseWeight) in weights.morphs {
+            setMorphWeight(named: morphName, weight: baseWeight * intensity)
         }
-
-        if !hasGLB {
-            animateBrows(for: emotion, intensity: intensity)
-        }
-
+        animateBrows(for: emotion, intensity: intensity)
         SCNTransaction.commit()
     }
 
@@ -270,6 +271,9 @@ final class SceneKitAvatarController: AvatarController {
                 bone.node.position = bone.restPosition
             }
             activeGesture = nil
+            glbExprFlicker = nil
+            for key in currentEmotionMorphs.keys { setMorphWeight(named: key, weight: 0) }
+            currentEmotionMorphs.removeAll()
             glbRootNode?.eulerAngles = glbRootRestEuler
             glbRootNode?.position = glbRootRestPosition
         }
@@ -892,6 +896,23 @@ final class SceneKitAvatarController: AvatarController {
     private var glbLastIdleGesture: TimeInterval = 0
     private var glbNextIdleGestureInterval: TimeInterval = 8
 
+    // Idle gaze drift, so her eyes aren't locked dead-ahead while resting.
+    private var glbLastGazeDrift: TimeInterval = 0
+    private var glbNextGazeDrift: TimeInterval = 3
+    private var glbGazeDriftYaw: Float = 0
+    private var glbGazeDriftPitch: Float = 0
+
+    // Living face: the held emotion is eased toward its target every frame, with a slow
+    // ambient brow motion and occasional spontaneous flickers layered on top so a resting
+    // face never looks frozen.
+    private var targetEmotionMorphs: [String: Float] = [:]
+    private var currentEmotionMorphs: [String: Float] = [:]
+    private var glbFaceBrowPhase: Float = 0
+    private var glbLastExprFlicker: TimeInterval = 0
+    private var glbNextExprFlickerInterval: TimeInterval = 5
+    private struct ExprFlicker { let start: TimeInterval; let dur: TimeInterval; let morphs: [String: Float] }
+    private var glbExprFlicker: ExprFlicker?
+
     /// Master per-frame update for the GLB humanoid. Composes three additive layers on
     /// top of each bone's rest transform: ambient idle motion (breathing/sway/weight
     /// shift), smoothed gaze, and a transient gesture. Breathing and blinking continue
@@ -907,10 +928,23 @@ final class SceneKitAvatarController: AvatarController {
         let breathe = sin(glbBreathePhase)
         let sway = sin(glbSwayPhase)
 
-        // Smoothly approach the current gaze target.
+        // Idle gaze drift: occasionally glance around so the eyes aren't locked forward.
+        if idleAmp > 0 {
+            if now - glbLastGazeDrift > glbNextGazeDrift {
+                glbGazeDriftYaw = Float.random(in: -0.1...0.1)
+                glbGazeDriftPitch = Float.random(in: -0.05...0.05)
+                glbLastGazeDrift = now
+                glbNextGazeDrift = TimeInterval.random(in: 2.5...5)
+            }
+        } else {
+            glbGazeDriftYaw = 0
+            glbGazeDriftPitch = 0
+        }
+
+        // Smoothly approach the current gaze target (plus any idle drift).
         let lerp = min(Float(dt) * 6, 1)
-        gazeYaw += (targetGazeYaw - gazeYaw) * lerp
-        gazePitch += (targetGazePitch - gazePitch) * lerp
+        gazeYaw += (targetGazeYaw + glbGazeDriftYaw - gazeYaw) * lerp
+        gazePitch += (targetGazePitch + glbGazeDriftPitch - gazePitch) * lerp
 
         // Occasionally play a small idle gesture so resting isn't perfectly static.
         if idleAmp > 0, activeGesture == nil, now - glbLastIdleGesture > glbNextIdleGestureInterval {
@@ -1029,7 +1063,65 @@ final class SceneKitAvatarController: AvatarController {
                                        glbRootRestPosition.z)
         }
 
+        updateGLBFace(dt, now: now)
         updateGLBBlink(now: now)
+    }
+
+    /// Drives facial blend shapes every frame so the expression is alive: the held
+    /// emotion eases toward its target, a slow ambient brow motion keeps a neutral face
+    /// from looking frozen, and occasional flickers add spontaneity. All ambient motion
+    /// is gated by the idle flag (suspended during speech) and Reduce Motion.
+    private func updateGLBFace(_ dt: TimeInterval, now: TimeInterval) {
+        guard hasGLB, !reduceMotion else { return }
+        let lerp = min(Float(dt) * 5, 1)
+        let ambientAmp: Float = isIdleEnabled ? 1 : 0
+
+        glbFaceBrowPhase += Float(dt) * 0.7
+        let browAmbient = (sin(glbFaceBrowPhase) * 0.5 + 0.5) * 0.07 * ambientAmp
+
+        // Occasionally trigger a brief spontaneous expression.
+        if ambientAmp > 0, glbExprFlicker == nil, now - glbLastExprFlicker > glbNextExprFlickerInterval {
+            let options: [[String: Float]] = [
+                ["Fcl_BRW_Surprised": 0.35, "Fcl_EYE_Surprised": 0.12],
+                ["Fcl_MTH_Joy": 0.25, "Fcl_EYE_Joy": 0.2],
+                ["Fcl_BRW_Fun": 0.3, "Fcl_MTH_Fun": 0.2],
+            ]
+            glbExprFlicker = ExprFlicker(start: now,
+                                         dur: TimeInterval.random(in: 0.6...1.1),
+                                         morphs: options.randomElement() ?? [:])
+            glbLastExprFlicker = now
+            glbNextExprFlickerInterval = TimeInterval.random(in: 6...12)
+        }
+
+        // Compose the desired weights: held emotion + ambient brow + active flicker.
+        var desired = targetEmotionMorphs
+        if browAmbient > 0.001 {
+            desired["Fcl_BRW_Surprised", default: 0] += browAmbient
+        }
+        if let f = glbExprFlicker {
+            let p = Float((now - f.start) / f.dur)
+            if p >= 1 {
+                glbExprFlicker = nil
+            } else {
+                let env = sin(Float.pi * p)
+                for (k, v) in f.morphs { desired[k] = max(desired[k] ?? 0, v * env) }
+            }
+        }
+
+        // Ease each morph toward its desired weight, releasing any that have settled.
+        let keys = Set(currentEmotionMorphs.keys).union(desired.keys)
+        for key in keys {
+            let target = desired[key] ?? 0
+            let cur = currentEmotionMorphs[key] ?? 0
+            let next = cur + (target - cur) * lerp
+            if abs(next) < 0.002 {
+                currentEmotionMorphs[key] = nil
+                setMorphWeight(named: key, weight: 0)
+            } else {
+                currentEmotionMorphs[key] = next
+                setMorphWeight(named: key, weight: min(next, 1))
+            }
+        }
     }
 
     private func setBone(_ logical: String, pitch: Float, yaw: Float, roll: Float) {

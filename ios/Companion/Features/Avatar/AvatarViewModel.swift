@@ -184,6 +184,20 @@ final class AvatarViewModel: ObservableObject {
         gestureSystem.playGesture(gesture)
     }
 
+    /// A brief attentive reaction when the user sends a message: look over, warm up, and
+    /// give a small acknowledging nod, then settle back unless a reply has started.
+    func reactToUserMessage() {
+        guard !isSpeaking else { return }
+        gazeSystem.overrideGaze(.user)
+        emotionSystem.setEmotion(.warm, intensity: 0.45, duration: 0.25)
+        gestureSystem.playGesture(.nod)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in
+            guard let self, !self.isSpeaking else { return }
+            self.gazeSystem.overrideGaze(nil)
+            self.emotionSystem.resetToNeutral(duration: 0.4)
+        }
+    }
+
     // MARK: - Tap handling
 
     func handleTap() {
