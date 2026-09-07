@@ -1,7 +1,7 @@
-# Graph Report - CompyPal  (2026-09-06)
+# Graph Report - CompyPal  (2026-09-07)
 
 ## Corpus Check
-- 73 files · ~103,772 words
+- 74 files · ~246,794 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
