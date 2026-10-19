@@ -1,7 +1,7 @@
-# Graph Report - CompyPal  (2026-10-12)
+# Graph Report - CompyPal  (2026-10-19)
 
 ## Corpus Check
-- 74 files · ~250,510 words
+- 74 files · ~180,407 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 6 file(s) not represented in the graph (top: .plist 2, (none) 1, .jsonl 1)
 
