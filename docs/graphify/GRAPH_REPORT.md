@@ -1,7 +1,7 @@
-# Graph Report - CompyPal  (2026-10-26)
+# Graph Report - CompyPal  (2026-11-02)
 
 ## Corpus Check
-- 74 files · ~118,728 words
+- 74 files · ~122,066 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 6 file(s) not represented in the graph (top: .plist 2, (none) 1, .jsonl 1)
 
@@ -288,7 +288,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Are the 14 inferred relationships involving `AvatarViewModel` (e.g. with `.debugOverlay` and `AvatarDebugState`) actually correct?**
   _`AvatarViewModel` has 14 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `.body`, `unavailable`, `noResult` to the rest of the system?**
-  _151 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _151 weakly-connected nodes found - possible missing edges._
 - **Should `AvatarViewModel` be split into smaller, more focused modules?**
   _Cohesion score 0.05041797283176593 - nodes in this community are weakly interconnected._
 - **Why does `AvatarViewModel` connect `AvatarViewModel` to `Foundation`, `.setEmotion()`, `Emotion`, `BehaviorSystems.swift`, `ChatView`, `SceneKitAvatarController`, `GestureSystem`, `AvatarDescriptor`, `PerformanceDirector`, `Viseme`, `GazeSystem`, `String`, `WardrobeSlot`?**
