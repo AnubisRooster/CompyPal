@@ -1,47 +1,48 @@
-# Graph Report - CompyPal  (2026-11-16)
+# Graph Report - CompyPal  (2026-11-23)
 
 ## Corpus Check
-- 74 files · ~122,063 words
+- 74 files · ~122,830 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 6 file(s) not represented in the graph (top: .plist 2, (none) 1, .jsonl 1)
 
 ## Summary
-- 1080 nodes · 2248 edges · 73 communities (51 shown, 22 thin omitted)
+- 1080 nodes · 2249 edges · 74 communities (49 shown, 25 thin omitted)
 - Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 331 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- ChatViewModel
 - AvatarTests
+- ChatViewModel
 - Foundation
 - AvatarScene
 - ElevenLabsTTS
 - AppleSpeechSTTEngine
+- CodingKey
 - AppearanceDelta
-- SceneKitAvatarController
-- Hashable
-- AvatarController
 - AvatarViewModel
-- MemoryStore
-- CatalogEntry
+- SceneKitAvatarController
+- CodingKeys
 - .systemPrompt()
 - AvatarThumbnail
-- Gesture
-- CodingKey
-- CompanionInfo
-- String
-- Viseme
-- Codable
-- SettingsViewModel
+- MemoryStore
 - ChatView
+- Gesture
+- Codable
+- AvatarController
+- WardrobeSlot
+- CompanionInfo
+- CatalogEntry
+- Viseme
 - CompanionTests
 - ClientError
-- WardrobeSlot
-- opencode.json
-- Message
+- String
+- .setEnabled()
 - SettingsView
+- KeychainService
+- opencode.json
+- SettingsViewModel
+- Message
 - .generateForCompanion()
-- PerformanceDirector
 - AvatarError
 - CompanionApp
 - Pricing
@@ -51,19 +52,18 @@
 - Emotion
 - ExpressionPreset
 - String
-- OpenRouterClient
-- GazeTarget
-- project.yml
 - CatalogFetcher
+- OpenRouterClient
+- project.yml
+- ReactivitySystem
 - properties
 - KeychainError
-- CompanionsViewModel
 - CatalogCache
-- AvatarDescriptor
+- GazeTarget
 - TimeInterval
 - CatalogStatus
 - CompanionTests
-- CodingKeys
+- AvatarDescriptor
 - NewCompanionView
 - Companion
 - packages
@@ -73,6 +73,7 @@
 - AppearanceIntentParser
 - settings
 - CaseIterable
+- .apply()
 - BlendShapeWeights
 - .frameModel()
 - dependencies
@@ -106,15 +107,15 @@
 ## Import Cycles
 - None detected.
 
-## Communities (73 total, 22 thin omitted)
+## Communities (74 total, 25 thin omitted)
 
-### Community 0 - "ChatViewModel"
-Cohesion: 0.06
-Nodes (10): AudioRecorderService, DevelopmentAvatarPreview, .appearanceView, .emotionGrid, .gestureGrid, .sequenceView, .body, .inputBar (+2 more)
-
-### Community 1 - "AvatarTests"
+### Community 0 - "AvatarTests"
 Cohesion: 0.05
 Nodes (5): TTSEngine, .isPaused, completion, PerformanceTrackParser, AvatarTests
+
+### Community 1 - "ChatViewModel"
+Cohesion: 0.08
+Nodes (10): AudioRecorderService, PerformanceTrack, DevelopmentAvatarPreview, .emotionGrid, .gestureGrid, .sequenceView, .body, .inputBar (+2 more)
 
 ### Community 2 - "Foundation"
 Cohesion: 0.06
@@ -132,69 +133,65 @@ Nodes (8): ElevenLabsTTS, TTSError, decodeFailed, emptyAudio, .errorDescription,
 Cohesion: 0.09
 Nodes (6): AppleSpeechSTTEngine, STTEngine, STTEngineType, appleSpeech, whisper, WhisperSTTEngine
 
-### Community 6 - "AppearanceDelta"
+### Community 6 - "CodingKey"
+Cohesion: 0.07
+Nodes (27): CodingKeys, inputModalities, outputModalities, CodingKeys, entries, lastRefreshed, CodingKeys, architecture (+19 more)
+
+### Community 7 - "AppearanceDelta"
 Cohesion: 0.15
 Nodes (7): AppearanceDelta, AttributeDef, AttributeType, color, `enum`, ParametricSchema, ParametricSchemaTests
 
-### Community 7 - "SceneKitAvatarController"
-Cohesion: 0.13
+### Community 8 - "AvatarViewModel"
+Cohesion: 0.14
+Nodes (6): CompanionAvatarView, .debugOverlay, AvatarViewModel, .appearanceView, .body, .companionHeader
+
+### Community 9 - "SceneKitAvatarController"
+Cohesion: 0.12
 Nodes (5): SceneKitAvatarController, .availableClipNames, .isGLBLoaded, .morpherIndexCount, .morpherIndexUniqueNameCount
 
-### Community 8 - "Hashable"
+### Community 10 - "CodingKeys"
 Cohesion: 0.12
 Nodes (19): CompanionState, CodingKeys, appearance, companionId, name, relationshipStage, traits, turnCount (+11 more)
 
-### Community 9 - "AvatarController"
-Cohesion: 0.15
-Nodes (7): AvatarController, EmotionSystem, GazeSystem, GestureSystem, IdleLifeSystem, ReactivitySystem, SecondaryMotionSystem
-
-### Community 10 - "AvatarViewModel"
-Cohesion: 0.14
-Nodes (3): .body, .debugOverlay, AvatarViewModel
-
-### Community 12 - "CatalogEntry"
-Cohesion: 0.20
-Nodes (7): CatalogEntry, ModelRole, chat, extract, image, SelectionPolicy, SelectionPolicyTests
-
-### Community 13 - ".systemPrompt()"
+### Community 11 - ".systemPrompt()"
 Cohesion: 0.16
 Nodes (3): MemoryInfo, PersonaAssembler, PersonaAssemblerTests
 
-### Community 14 - "AvatarThumbnail"
+### Community 12 - "AvatarThumbnail"
 Cohesion: 0.14
 Nodes (9): AvatarThumbnail, .eyeColor, .hairColor, .hairLength, .hairStyle, .isLong, .renderedFace, .skinColor (+1 more)
+
+### Community 14 - "ChatView"
+Cohesion: 0.14
+Nodes (14): ChatPlaceholderView, .body, ContentView, .body, ChatView, .avatarAccessibilityLabel, .offlineBanner, .scrollView (+6 more)
 
 ### Community 15 - "Gesture"
 Cohesion: 0.10
 Nodes (21): Gesture, bow, dance, handToChest, idle, jump, laugh, leanBack (+13 more)
 
-### Community 16 - "CodingKey"
-Cohesion: 0.10
-Nodes (19): CodingKeys, entries, lastRefreshed, CodingKeys, architecture, contextLength, id, name (+11 more)
+### Community 16 - "Codable"
+Cohesion: 0.20
+Nodes (15): CatalogCacheData, CatalogResponse, ChatChunk, ChatResponse, ChunkChoice, Delta, ImageData, ImageRequest (+7 more)
 
-### Community 17 - "CompanionInfo"
+### Community 17 - "AvatarController"
+Cohesion: 0.19
+Nodes (7): AvatarController, PersonalityMotionProfile, EmotionSystem, GazeSystem, GestureSystem, IdleLifeSystem, PerformanceDirector
+
+### Community 18 - "WardrobeSlot"
+Cohesion: 0.20
+Nodes (4): Architecture, GarmentAsset, WardrobeSlot, WardrobeSystem
+
+### Community 19 - "CompanionInfo"
 Cohesion: 0.16
-Nodes (9): ChatPlaceholderView, .body, ContentView, .body, CompanionInfo, .level, CompanionRow, .body (+1 more)
+Nodes (5): CompanionInfo, .level, CompanionsView, .body, CompanionsViewModel
 
-### Community 18 - "String"
-Cohesion: 0.18
-Nodes (9): Architecture, CodingKeys, inputModalities, outputModalities, AvatarDebugState, ExpressionWeights, PerformanceBeat, PerformanceTrack (+1 more)
+### Community 20 - "CatalogEntry"
+Cohesion: 0.27
+Nodes (3): CatalogEntry, SelectionPolicy, SelectionPolicyTests
 
-### Community 19 - "Viseme"
-Cohesion: 0.22
+### Community 22 - "Viseme"
+Cohesion: 0.23
 Nodes (8): Viseme, aa, ee, ih, oh, ou, sil, LipSyncSystem
-
-### Community 20 - "Codable"
-Cohesion: 0.26
-Nodes (13): CatalogCacheData, CatalogResponse, ChatChunk, ChatResponse, ChunkChoice, Delta, ImageData, ImageResponse (+5 more)
-
-### Community 21 - "SettingsViewModel"
-Cohesion: 0.18
-Nodes (4): KeychainService, SettingsViewModel, .imageGenEnabled, Security
-
-### Community 22 - "ChatView"
-Cohesion: 0.15
-Nodes (11): CompanionAvatarView, .body, ChatView, .avatarAccessibilityLabel, .companionHeader, .offlineBanner, .scrollView, DotLoader (+3 more)
 
 ### Community 24 - "CompanionTests"
 Cohesion: 0.15
@@ -204,133 +201,129 @@ Nodes (3): Extraction, MemoryExtractor, CompanionTests
 Cohesion: 0.18
 Nodes (9): ClientError, .description, .errorDescription, httpError, invalidResponse, noKey, serverMessage, unauthorized (+1 more)
 
-### Community 26 - "WardrobeSlot"
-Cohesion: 0.28
-Nodes (3): GarmentAsset, WardrobeSlot, WardrobeSystem
+### Community 26 - "String"
+Cohesion: 0.22
+Nodes (7): AvatarDebugState, ExpressionWeights, PerformanceBeat, RigMapping, BlinkMapping, WardrobeMapping, StringProtocol
 
-### Community 27 - "opencode.json"
+### Community 28 - "SettingsView"
+Cohesion: 0.23
+Nodes (5): OnboardingView, .body, SettingsView, .body, .chatModels
+
+### Community 30 - "opencode.json"
 Cohesion: 0.15
 Nodes (12): autoupdate, options, instructions, model, apiKey, permission, bash, edit (+4 more)
 
-### Community 28 - "Message"
+### Community 32 - "Message"
 Cohesion: 0.21
 Nodes (7): ChatRequest, CodingKeys, maxTokens, messages, model, stream, Message
 
-### Community 29 - "SettingsView"
-Cohesion: 0.24
-Nodes (5): OnboardingView, .body, SettingsView, .body, .chatModels
-
-### Community 32 - "AvatarError"
+### Community 34 - "AvatarError"
 Cohesion: 0.17
 Nodes (4): AvatarError, garmentLoadFailed, garmentNotFound, glbLoadFailed
 
-### Community 33 - "CompanionApp"
+### Community 35 - "CompanionApp"
 Cohesion: 0.22
 Nodes (4): CatalogRefreshChecker, CompanionApp, .body, OSLog
 
-### Community 34 - "Pricing"
+### Community 36 - "Pricing"
 Cohesion: 0.22
 Nodes (5): Pricing, CodingKeys, image, perRequest, prompt
 
-### Community 35 - "DatabaseManager"
+### Community 37 - "DatabaseManager"
 Cohesion: 0.29
 Nodes (3): DatabaseManager, migrationCreatesTables(), storeReadWriteRoundtrip()
 
-### Community 36 - "ChatModels.swift"
+### Community 38 - "ChatModels.swift"
 Cohesion: 0.27
 Nodes (9): ServerDone, ServerEmotion, ServerError, ServerToken, UserMessage, CodingKeys, companionId, text (+1 more)
 
-### Community 38 - "Emotion"
+### Community 40 - "Emotion"
 Cohesion: 0.18
 Nodes (10): Emotion, affectionate, concerned, happy, neutral, playful, sad, surprised (+2 more)
 
-### Community 39 - "ExpressionPreset"
+### Community 41 - "ExpressionPreset"
 Cohesion: 0.18
 Nodes (11): ExpressionPreset, amused, concerned, curious, excited, neutral, playful, serious (+3 more)
 
-### Community 44 - "GazeTarget"
-Cohesion: 0.22
-Nodes (5): GazeTarget, away, camera, idle, user
-
-### Community 45 - "project.yml"
+### Community 46 - "project.yml"
 Cohesion: 0.20
 Nodes (9): iOS, name, options, bundleIdPrefix, deploymentTarget, xcodeVersion, settings, SWIFT_VERSION (+1 more)
 
-### Community 49 - "properties"
+### Community 48 - "properties"
 Cohesion: 0.22
 Nodes (9): properties, CFBundleDisplayName, CFBundleName, CFBundleShortVersionString, CFBundleVersion, NSMicrophoneUsageDescription, NSSpeechRecognitionUsageDescription, UIApplicationSupportsIndirectInputEvents (+1 more)
 
-### Community 50 - "KeychainError"
+### Community 49 - "KeychainError"
 Cohesion: 0.25
 Nodes (6): KeychainError, .description, encodeFailed, invalidKeyFormat, readFailed, storeFailed
 
-### Community 55 - "CatalogStatus"
+### Community 51 - "GazeTarget"
+Cohesion: 0.29
+Nodes (5): GazeTarget, away, camera, idle, user
+
+### Community 53 - "CatalogStatus"
 Cohesion: 0.25
 Nodes (6): CatalogStatus, cached, failed, fetched, refreshing, unknown
 
-### Community 56 - "CompanionTests"
+### Community 54 - "CompanionTests"
 Cohesion: 0.25
 Nodes (8): platform, settings, sources, type, GENERATE_INFOPLIST_FILE, PRODUCT_BUNDLE_IDENTIFIER, TEST_TARGET_NAME, CompanionTests
 
-### Community 57 - "CodingKeys"
-Cohesion: 0.29
-Nodes (6): ImageRequest, CodingKeys, model, n, prompt, size
-
-### Community 59 - "Companion"
+### Community 58 - "Companion"
 Cohesion: 0.29
 Nodes (7): info, platform, sources, type, path, path, Companion
 
-### Community 60 - "packages"
+### Community 59 - "packages"
 Cohesion: 0.29
 Nodes (7): from, url, from, url, packages, GLTFKit2, GRDB
 
-### Community 61 - "ConnectionStatus"
+### Community 60 - "ConnectionStatus"
 Cohesion: 0.33
 Nodes (5): ConnectionStatus, failed, idle, success, testing
 
-### Community 62 - "MemoryStore.swift"
+### Community 61 - "MemoryStore.swift"
 Cohesion: 0.60
 Nodes (3): GRDB, appearanceAttributes(), personalityTraits()
 
-### Community 63 - "CodingKeys"
+### Community 62 - "CodingKeys"
 Cohesion: 0.33
 Nodes (6): CodingKeys, inputReferences, model, n, prompt, size
 
-### Community 65 - "settings"
+### Community 64 - "settings"
 Cohesion: 0.33
 Nodes (6): settings, CODE_SIGN_STYLE, CURRENT_PROJECT_VERSION, DEVELOPMENT_TEAM, INFOPLIST_FILE, MARKETING_VERSION
 
-### Community 67 - "CaseIterable"
+### Community 66 - "CaseIterable"
 Cohesion: 0.40
 Nodes (3): ModelMode, auto, pinned
 
-### Community 70 - "dependencies"
+### Community 71 - "dependencies"
 Cohesion: 0.50
 Nodes (4): dependencies, dependencies, package, target
 
-### Community 71 - "preBuildScripts"
+### Community 72 - "preBuildScripts"
 Cohesion: 0.50
 Nodes (4): preBuildScripts, basedOnDependencyAnalysis, name, script
 
 ## Knowledge Gaps
 - **159 isolated node(s):** `.body`, `unavailable`, `noResult`, `missingKey`, `http` (+154 more)
   These have ≤1 connection - possible missing edges. (Counts symbols only; 347 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **22 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **25 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ChatViewModel` connect `ChatViewModel` to `AppearanceIntentParser`, `AvatarTests`, `Foundation`, `ElevenLabsTTS`, `OpenRouterClient`, `MemoryStore`, `CatalogEntry`, `AvatarViewModel`, `.read()`, `Gesture`, `CompanionInfo`, `CatalogCache`, `SettingsViewModel`, `ChatView`, `CompanionTests`, `.generateForCompanion()`?**
+- **Why does `ChatViewModel` connect `ChatViewModel` to `AvatarTests`, `.generateForCompanion()`, `Foundation`, `.apply()`, `ElevenLabsTTS`, `AvatarViewModel`, `OpenRouterClient`, `ChatView`, `MemoryStore`, `Gesture`, `CatalogCache`, `CompanionInfo`, `CatalogEntry`, `CompanionTests`, `SettingsViewModel`, `KeychainService`, `AppearanceIntentParser`?**
   _High betweenness centrality (0.195) - this node is a cross-community bridge._
 - **Are the 14 inferred relationships involving `AvatarViewModel` (e.g. with `.debugOverlay` and `AvatarDebugState`) actually correct?**
   _`AvatarViewModel` has 14 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `.body`, `unavailable`, `noResult` to the rest of the system?**
   _159 weakly-connected nodes found - possible missing edges._
-- **Should `ChatViewModel` be split into smaller, more focused modules?**
-  _Cohesion score 0.05754475703324808 - nodes in this community are weakly interconnected._
-- **Why does `AvatarViewModel` connect `AvatarViewModel` to `ChatViewModel`, `Foundation`, `Emotion`, `SceneKitAvatarController`, `AvatarController`, `.setEmotion()`, `GazeTarget`, `.playGesture()`, `String`, `Viseme`, `AvatarDescriptor`, `ChatView`, `WardrobeSlot`, `PerformanceDirector`?**
+- **Should `AvatarTests` be split into smaller, more focused modules?**
+  _Cohesion score 0.05137844611528822 - nodes in this community are weakly interconnected._
+- **Why does `AvatarViewModel` connect `AvatarViewModel` to `ChatViewModel`, `Foundation`, `.playGesture()`, `Emotion`, `SceneKitAvatarController`, `ReactivitySystem`, `AvatarController`, `WardrobeSlot`, `GazeTarget`, `.setEmotion()`, `Viseme`, `.setGaze()`, `String`, `.setEnabled()`?**
   _High betweenness centrality (0.134) - this node is a cross-community bridge._
 - **Are the 10 inferred relationships involving `ChatViewModel` (e.g. with `.inputBar` and `AudioRecorderService`) actually correct?**
   _`ChatViewModel` has 10 INFERRED edges - model-reasoned connections that need verification._
-- **Should `AvatarTests` be split into smaller, more focused modules?**
-  _Cohesion score 0.050816696914700546 - nodes in this community are weakly interconnected._
+- **Should `ChatViewModel` be split into smaller, more focused modules?**
+  _Cohesion score 0.07993966817496229 - nodes in this community are weakly interconnected._
